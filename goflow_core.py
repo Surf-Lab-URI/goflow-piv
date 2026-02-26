@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, Dataset, random_split
 from scipy.signal.windows import tukey
 from sklearn.metrics import r2_score as R2
 
@@ -23,6 +23,10 @@ from sklearn.metrics import r2_score as R2
 from unet_vel_bn import UNet
 from samudraUnet import SamudraUNet
 from simpleCNN import TwoLayerCNN
+
+import flow_transforms as f_transforms
+from utils import read_flow
+from piv_dataset import PIVDataset, TransformSubset
 
 
 # =============================================================================
@@ -220,6 +224,75 @@ def load_datasets(
         valid = SSTDataset(llc_file, varlist, valid_inds, step0=step0, num_input_frames=nframes)
         return train, test, valid
     return train, test
+
+# Transforms for PIV dataset
+def get_transform(crop_size=(256, 256)):
+    """Default transforms for training and validation."""
+    train_transform = f_transforms.Compose([
+        # f_transforms.RandomTranslate(16),
+        f_transforms.RandomScale([0.95, 1.45]),
+        f_transforms.RandomHorizontalFlip(),
+        f_transforms.RandomVerticalFlip(),
+        f_transforms.Crop(crop_size, crop_type='rand',padding=[0,0,0]),
+        f_transforms.ModToTensor(),
+        # f_transforms.RandomPhotometric(
+        #     min_noise_stddev=0.0,
+        #     max_noise_stddev=0.04,
+        #     min_contrast=-0.8,
+        #     max_contrast=0.4,
+        #     brightness_stddev=0.2,
+        #     min_color=0.5,
+        #     max_color=2.0,
+        #     min_gamma=0.7,
+        #     max_gamma=1.5,
+        # ),
+    ])
+    
+    val_transform = f_transforms.Compose([
+        f_transforms.Crop(crop_size, crop_type='center'),
+        f_transforms.ModToTensor(),
+    ])
+    
+    return train_transform, val_transform
+
+# For PIV dataset
+def make_splits(root: str, subsets: list = None, ext: str = 'tif', crop_size: tuple = (256, 256),
+                train_ratio: float = 0.7, val_ratio: float = 0.2, seed: int = 42):
+    """
+    Create train/val/test splits from a directory with subdirectories.
+    No JSON needed - just use PyTorch's random_split.
+    
+    Args:
+        root: Root directory containing subdirectories
+        subsets: List of subdirectory names to include, or None for all
+    
+    Returns:
+        train_dataset, val_dataset, test_dataset
+    """
+    # Create base dataset (no transform yet - we'll wrap it)
+    base = PIVDataset(root, subsets=subsets, ext=ext, crop_size=crop_size, transform=None)
+    
+    n = len(base)
+    n_train = int(n * train_ratio)
+    n_val = int(n * val_ratio)
+    n_test = n - n_train - n_val
+    
+    generator = torch.Generator().manual_seed(seed)
+    train_idx, val_idx, test_idx = random_split(
+        range(n), [n_train, n_val, n_test], generator=generator
+    )
+    
+    train_tf, val_tf = get_transform(crop_size)
+    
+    # Wrap with transforms
+    train_data = TransformSubset(base, train_idx.indices, train_tf)
+    val_data = TransformSubset(base, val_idx.indices, val_tf)
+    test_data = TransformSubset(base, test_idx.indices, val_tf)
+    
+    print(f"Split: train={len(train_data)}, val={len(val_data)}, test={len(test_data)}")
+    
+    return train_data, val_data, test_data
+
 
 
 def create_dataloaders(

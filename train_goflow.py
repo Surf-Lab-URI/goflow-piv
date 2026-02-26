@@ -29,7 +29,7 @@ from goflow_core import (
     gradient_loss, compute_gradient_r2, to_numpy,
     load_datasets, create_dataloaders,
     initialize_model, save_model, load_model,
-    get_model_string, count_parameters
+    get_model_string, count_parameters, make_splits
 )
 from spectral_loss import spectral_loss
 from utils import cosineSGDR
@@ -68,16 +68,21 @@ def parse_args():
     # Data paths
     parser.add_argument('--llc_file', type=str, default='llcGoes_gradT_trunc.nc',
                         help='LLC training data file')
-    parser.add_argument('--goes_file', type=str, default='GS_BT_NESMA2023_HiRes_SUBSECTION_grad_mask.nc',
-                        help='GOES satellite data file')
+    parser.add_argument('--data_root', type=str, default=None,
+                        help='training dataset root directory')
     parser.add_argument('--output_dir', type=str, default='./ncfiles/',
                         help='Output directory for NetCDF files')
     
     # Data parameters
     parser.add_argument('--nframes', type=int, default=3, help='Number of input frames')
     parser.add_argument('--step0', type=int, default=1, help='Time step stride')
-    parser.add_argument('--pm', type=float, default=5.0, help='X grid metric')
-    parser.add_argument('--pn', type=float, default=5.0, help='Y grid metric')
+    parser.add_argument('--pm', type=float, default=1, help='X grid metric')
+    parser.add_argument('--pn', type=float, default=1, help='Y grid metric')
+
+    parser.add_argument("--subsets", nargs="+", default=[], help="Subdirectories to use")
+    parser.add_argument("--ext", type=str, default="tif", help="Image extension")
+    parser.add_argument("--crop-size", type=int, nargs=2, default=[256, 256])
+
     
     return parser.parse_args()
 
@@ -254,21 +259,21 @@ def train_model(
             save_model(best_model, checkpoint_path)
             
             # Write test results
-            write_test_results(
-                epoch, best_model, test_loader, kernel_x, kernel_y,
-                config.c_spec, model_str, config.output_dir
-            )
+            # write_test_results(
+            #     epoch, best_model, test_loader, kernel_x, kernel_y,
+            #     config.c_spec, model_str, config.output_dir
+            # )
             
-            # Process satellite data
-            out_val, grad_val, sst_val = run_satellite_inference(
-                best_model, config.goes_file, config.valid_inds,
-                config.pm, config.pn
-            )
+            # # Process satellite data
+            # out_val, grad_val, sst_val = run_satellite_inference(
+            #     best_model, config.goes_file, config.valid_inds,
+            #     config.pm, config.pn
+            # )
             
-            # Write satellite predictions
-            output_file = f'preds_{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs{config.goes_file}'
-            write_satellite_netcdf(output_file, out_val, grad_val, sst_val,
-                                   config.valid_inds, config.goes_file)
+            # # Write satellite predictions
+            # output_file = f'preds_{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs{config.goes_file}'
+            # write_satellite_netcdf(output_file, out_val, grad_val, sst_val,
+            #                        config.valid_inds, config.goes_file)
         
         if spec_loss < best_spec:
             best_spec = spec_loss
@@ -478,21 +483,21 @@ def main():
         args.epochs = 100 if args.c_spec == 0 else 50
     
     # Get grid dimensions from GOES file
-    with NCDataset(args.goes_file, 'r') as nc:
-        Nx = nc.dimensions['lon'].size
-        Ny = nc.dimensions['lat'].size
+    # with NCDataset(args.goes_file, 'r') as nc:
+    #     Nx = nc.dimensions['lon'].size
+    #     Ny = nc.dimensions['lat'].size
     
     # Define training/test/validation regions
-    train_inds = [
-        (0, 256, 256, 512),
-        (0, 256, 512, 768),
-        (256, 512, 256, 512),
-        (256, 512, 512, 768),
-        (256, 512, Nx - 256, Nx)
-    ]
-    test_inds = (0, 256, Nx - 256, Nx)
-    valid_inds = (0, 512, Nx - 768, Nx)
-    args.valid_inds = valid_inds  # Store for later use
+    # train_inds = [
+    #     (0, 256, 256, 512),
+    #     (0, 256, 512, 768),
+    #     (256, 512, 256, 512),
+    #     (256, 512, 512, 768),
+    #     (256, 512, Nx - 256, Nx)
+    # ]
+    # test_inds = (0, 256, Nx - 256, Nx)
+    # valid_inds = (0, 512, Nx - 768, Nx)
+    # args.valid_inds = valid_inds  # Store for later use
     
     # Batch sizes depend on model complexity
     if args.model == 'samudra0' or args.nbase == 32:
@@ -501,11 +506,22 @@ def main():
         batch_sizes = {'train': 64, 'test': 200, 'valid': 50}
     
     # Load datasets
-    varlist = ['loggrad_T', 'U', 'V']
-    train_data, test_data = load_datasets(
-        args.llc_file, varlist, train_inds, test_inds,
-        step0=args.step0, nframes=args.nframes
+    # varlist = ['loggrad_T', 'U', 'V']
+    # train_data, test_data = load_datasets(
+    #     args.llc_file, varlist, train_inds, test_inds,
+    #     step0=args.step0, nframes=args.nframes
+    # )
+
+    train_data, val_data, test_data = make_splits(
+        root=args.data_root,
+        subsets=args.subsets,
+        ext=args.ext,
+        crop_size=args.crop_size,
+        train_ratio=0.7,
+        val_ratio=0,
+        seed=42,
     )
+
     train_loader, test_loader = create_dataloaders(train_data, test_data, batch_sizes=batch_sizes)
     
     # Initialize model
@@ -551,14 +567,14 @@ def main():
     np.save(f'r2_{model_str}_ver_{args.c_spec}cs.npy', r2_history)
     save_model(best_model, f'{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs.pth')
     
-    # Final satellite inference
-    out_val, grad_val, sst_val = run_satellite_inference(
-        best_model, args.goes_file, args.valid_inds,
-        args.pm, args.pn
-    )
+    # # Final satellite inference
+    # out_val, grad_val, sst_val = run_satellite_inference(
+    #     best_model, args.goes_file, args.valid_inds,
+    #     args.pm, args.pn
+    # )
     
-    output_file = f'preds_{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs{args.goes_file}'
-    write_satellite_netcdf(output_file, out_val, grad_val, sst_val, args.valid_inds, args.goes_file)
+    # output_file = f'preds_{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs{args.goes_file}'
+    # write_satellite_netcdf(output_file, out_val, grad_val, sst_val, args.valid_inds, args.goes_file)
     
     print('Training complete!')
 
