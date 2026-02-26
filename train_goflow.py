@@ -20,6 +20,9 @@ from torch.utils.data import DataLoader
 from netCDF4 import Dataset as NCDataset
 from tqdm import tqdm
 from copy import deepcopy
+import matplotlib.pyplot as plt
+from pathlib import Path
+
 
 # Local imports
 from goflow_core import (
@@ -64,6 +67,7 @@ def parse_args():
                         help='Number of epochs (default: 100 for c_spec=0, 50 otherwise)')
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate')
     parser.add_argument('--tcycle', type=int, default=5, help='Cosine annealing cycle length')
+    parser.add_argument('--resume', action='store_true', help='Set to resume training from previous best model' )
     
     # Data paths
     parser.add_argument('--llc_file', type=str, default='llcGoes_gradT_trunc.nc',
@@ -82,7 +86,6 @@ def parse_args():
     parser.add_argument("--subsets", nargs="+", default=[], help="Subdirectories to use")
     parser.add_argument("--ext", type=str, default="tif", help="Image extension")
     parser.add_argument("--crop-size", type=int, nargs=2, default=[256, 256])
-
     
     return parser.parse_args()
 
@@ -178,7 +181,38 @@ def evaluate_model(
         for x, y in tqdm(test_loader, desc='Evaluating'):
             x, y = x.to(kernel_x.device), y.to(kernel_x.device)
             y_pred = model(x)
+
+            y_cpu = y.to("cpu").numpy()[0,:,:,:]
+            y_pred_cpu = y_pred.to("cpu").numpy()[0,:,:,:]
+            parent_dir = Path(__file__).resolve().parent
+            dir = parent_dir / 'debugplots'
+            dir.mkdir(exist_ok=True)
             
+            plt.figure()
+            im = plt.imshow(y_pred_cpu[0,:,:])
+            plt.colorbar(im)
+            plt.savefig(dir / f"{count}upred.png")
+            plt.close()
+
+            plt.figure()
+            im = plt.imshow(y_cpu[0,:,:])
+            plt.colorbar(im)
+            plt.savefig(dir / f"{count}utarget.png")
+            plt.close()
+
+            plt.figure()
+            im = plt.imshow(y_pred_cpu[1,:,:])
+            plt.colorbar(im)
+            plt.savefig(dir / f"{count}vpred.png")
+            plt.close()
+
+            plt.figure()
+            im = plt.imshow(y_cpu[1,:,:])
+            plt.colorbar(im)
+            plt.savefig(dir / f"{count}vtarget.png")
+            plt.close()
+
+
             # Spectral loss
             spec_loss = spectral_loss(y_pred, y, tukey_window)
             
@@ -536,15 +570,16 @@ def main():
         device=device
     )
     
-    # Load pretrained weights if using spectral loss
+    # Load pretrained weights if using spectral loss or if '--resume' flag is set to true
     model_str = get_model_string(args.model, args.nbase, args.kernel_size, args.use_grad_loss)
-    if args.c_spec > 0:
+    if args.c_spec > 0 or args.resume:
         stage0_file = f'{model_str}_{args.step0}_{args.nframes}_0.0cs.pth'
         if os.path.exists(stage0_file):
             model = load_model(model, stage0_file, device)
         else:
             print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
-    
+
+
     # Setup optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(),

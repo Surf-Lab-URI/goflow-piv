@@ -37,8 +37,11 @@ class TransformSubset(Dataset):
         img2 = Image.open(img2_path)#.convert('RGB')
         flow = read_flow(flow_path)
         
-        data = [[img1, img2], [flow]]
-        return tuple(self.transform(*data))
+        imgs = np.stack([img1, img2], axis=0, dtype = np.float32)
+        flow = np.stack([flow[:,:,0],flow[:,:,1]], axis=0)
+        
+        # datatr = self.transform(*data)
+        return imgs, flow
 
 class PIVDataset(Dataset):
     """
