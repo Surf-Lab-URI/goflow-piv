@@ -1,3 +1,44 @@
+# Andy's Intallation Process for Expanse
+Log in to a gpu node on Expanse and run the following commands. If you don't have conda, install miniconda first using [these]([url](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-terminal-installer)) instructions. Then set up a conda environment to work in:
+
+```bash
+conda create -n goflow-piv python=3.14
+```
+Then activate the conda environment
+
+```bash
+conda activate goflow-piv
+```
+
+And install the the cuda toolkit. You could probably also load one of the CUDA modules avaiable on Expanse, but then you'd have to do that every time. PyTorch comes with its own CUDA runtime environment, but cupy seems to require a full, separate CUDA toolkit installation. You need cupy for piv-simple, but you might not need it here. But this is the process I used.
+
+```bash
+conda install cuda -c nvidia
+```
+
+It also requires a newer version of the C++ standard library than is provided by Expanse.
+
+```bash
+conda install -c conda-forge libstdcxx-ng
+```
+
+Then install the python libraries required:
+
+### Requirements
+
+- Python 3.8+
+- PyTorch 1.10+
+- NumPy
+- SciPy
+- scikit-learn
+- netCDF4
+- tqdm
+
+```bash
+pip install torch numpy scipy scikit-learn netCDF4 tqdm
+```
+
+
 # GOFLOW: Geostationary Ocean Flow
 
 Deep learning framework for predicting ocean surface velocity fields from satellite sea surface temperature (SST) gradient observations.
