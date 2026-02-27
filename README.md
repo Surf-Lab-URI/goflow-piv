@@ -28,14 +28,16 @@ Then install the python libraries required:
 
 - Python 3.8+
 - PyTorch 1.10+
+- torchvision
 - NumPy
 - SciPy
 - scikit-learn
 - netCDF4
 - tqdm
+- psutil
 
 ```bash
-pip install torch numpy scipy scikit-learn netCDF4 tqdm
+pip install torch numpy scipy scikit-learn netCDF4 tqdm torchvision psutil
 ```
 
 
