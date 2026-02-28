@@ -35,9 +35,10 @@ Then install the python libraries required:
 - netCDF4
 - tqdm
 - psutil
+- opencv-python
 
 ```bash
-pip install torch numpy scipy scikit-learn netCDF4 tqdm torchvision psutil
+pip install torch numpy scipy scikit-learn netCDF4 tqdm torchvision psutil opencv-python
 ```
 
 
