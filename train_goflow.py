@@ -66,6 +66,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=None,
                         help='Number of epochs (default: 100 for c_spec=0, 50 otherwise)')
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate')
+    parser.add_argument('--batch_size', type=int, default=None, help='Training batch size')
     parser.add_argument('--tcycle', type=int, default=5, help='Cosine annealing cycle length')
     parser.add_argument('--resume', action='store_true', help='Set to resume training from previous best model' )
     
@@ -86,6 +87,8 @@ def parse_args():
     parser.add_argument("--subsets", nargs="+", default=[], help="Subdirectories to use")
     parser.add_argument("--ext", type=str, default="tif", help="Image extension")
     parser.add_argument("--crop-size", type=int, nargs=2, default=[256, 256])
+    parser.add_argument("--rand_trans", nargs='+', type=int, default=0)
+
     
     return parser.parse_args()
 
@@ -176,41 +179,62 @@ def evaluate_model(
     total_r2 = 0.0
     total_spec_loss = 0.0
     count = 0
-    
+    plotcount = 0
     with torch.no_grad():
         for x, y in tqdm(test_loader, desc='Evaluating'):
             x, y = x.to(kernel_x.device), y.to(kernel_x.device)
             y_pred = model(x)
 
-            y_cpu = y.to("cpu").numpy()[0,:,:,:]
-            y_pred_cpu = y_pred.to("cpu").numpy()[0,:,:,:]
-            parent_dir = Path(__file__).resolve().parent
-            dir = parent_dir / 'debugplots'
-            dir.mkdir(exist_ok=True)
-            
-            plt.figure()
-            im = plt.imshow(y_pred_cpu[0,:,:])
-            plt.colorbar(im)
-            plt.savefig(dir / f"{count}upred.png")
-            plt.close()
+            for i in range(0,2):
+                y_cpu = y.to("cpu").numpy()[i,:,:,:]
+                x_cpu = x.to("cpu").numpy()[i,:,:,:]
+                y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
+                parent_dir = Path(__file__).resolve().parent
+                dir = parent_dir / 'debugplots'
+                dir.mkdir(exist_ok=True)
+                
+                plt.figure()
+                im = plt.imshow(y_pred_cpu[0,:,:])
+                cbar = plt.colorbar(im)
+                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+                plt.title('Inference')
+                plt.savefig(dir / f"{plotcount}upred.png")
+                plt.close()
 
-            plt.figure()
-            im = plt.imshow(y_cpu[0,:,:])
-            plt.colorbar(im)
-            plt.savefig(dir / f"{count}utarget.png")
-            plt.close()
+                plt.figure()
+                im = plt.imshow(y_cpu[0,:,:])
+                cbar = plt.colorbar(im)
+                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+                plt.title('Target')
+                plt.savefig(dir / f"{plotcount}utarget.png")
+                plt.close()
 
-            plt.figure()
-            im = plt.imshow(y_pred_cpu[1,:,:])
-            plt.colorbar(im)
-            plt.savefig(dir / f"{count}vpred.png")
-            plt.close()
+                plt.figure()
+                im = plt.imshow(y_pred_cpu[1,:,:])
+                cbar = plt.colorbar(im)
+                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+                plt.title('Inference')
+                plt.savefig(dir / f"{plotcount}vpred.png")
+                plt.close()
 
-            plt.figure()
-            im = plt.imshow(y_cpu[1,:,:])
-            plt.colorbar(im)
-            plt.savefig(dir / f"{count}vtarget.png")
-            plt.close()
+                plt.figure()
+                im = plt.imshow(y_cpu[1,:,:])
+                cbar = plt.colorbar(im)
+                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+                plt.title('Target')
+                plt.savefig(dir / f"{plotcount}vtarget.png")
+                plt.close()
+
+                plt.figure()
+                plt.imshow(x_cpu[1,:,:], cmap='gray')
+                plt.savefig(dir / f"{plotcount}im1.png")
+                plt.close()
+
+                plt.figure()
+                plt.imshow(x_cpu[0,:,:], cmap='gray')
+                plt.savefig(dir / f"{plotcount}im0.png")
+                plt.close()
+                plotcount += 1
 
 
             # Spectral loss
@@ -218,12 +242,18 @@ def evaluate_model(
             
             # R² on gradient fields (vorticity + strain)
             r2 = compute_gradient_r2(y, y_pred, kernel_x, kernel_y, mask)
+
+            # Calculate mean error in the mean
+            d = y_pred-y
+            d = torch.mean(d,[2,3])
+            d = torch.sqrt(d[:,0]**2 + d[:,1]**2)
+            mean_diff = torch.mean(d)
             
             total_r2 += r2
             total_spec_loss += spec_loss.item()
             count += 1
     
-    return total_r2 / count, total_spec_loss / count
+    return total_r2 / count, total_spec_loss / count, mean_diff
 
 
 def train_model(
@@ -255,6 +285,7 @@ def train_model(
     # Tracking
     best_r2 = -1000
     best_spec = 1000
+    best_mean_diff = 1e5
     r2_history = np.zeros(config.epochs)
     best_model = None
     
@@ -280,7 +311,7 @@ def train_model(
         print(f'Epoch {epoch+1}: L1={l1_loss:.4f}, {loss_type}={aux_loss:.4f}')
         
         # Evaluate
-        r2, spec_loss = evaluate_model(model, test_loader, kernel_x, kernel_y, mask, tukey_window)
+        r2, spec_loss, mean_diff = evaluate_model(model, test_loader, kernel_x, kernel_y, mask, tukey_window)
         r2_history[epoch] = r2
         
         # Track best model
@@ -311,9 +342,13 @@ def train_model(
         
         if spec_loss < best_spec:
             best_spec = spec_loss
+
+        if mean_diff < best_mean_diff:
+            best_mean_diff = mean_diff
+
         
         print(f'Epoch {epoch+1}/{config.epochs} | R²: {r2:.4f} (best: {best_r2:.4f}) | '
-              f'Spec: {spec_loss:.4f} (best: {best_spec:.4f})')
+              f'Spec: {spec_loss:.4f} (best: {best_spec:.4f}) | mean difference: {mean_diff:.4f} (best:{best_mean_diff:.4f})')
     
     return best_model, r2_history
 
@@ -516,35 +551,18 @@ def main():
     if args.epochs is None:
         args.epochs = 100 if args.c_spec == 0 else 50
     
-    # Get grid dimensions from GOES file
-    # with NCDataset(args.goes_file, 'r') as nc:
-    #     Nx = nc.dimensions['lon'].size
-    #     Ny = nc.dimensions['lat'].size
-    
-    # Define training/test/validation regions
-    # train_inds = [
-    #     (0, 256, 256, 512),
-    #     (0, 256, 512, 768),
-    #     (256, 512, 256, 512),
-    #     (256, 512, 512, 768),
-    #     (256, 512, Nx - 256, Nx)
-    # ]
-    # test_inds = (0, 256, Nx - 256, Nx)
-    # valid_inds = (0, 512, Nx - 768, Nx)
-    # args.valid_inds = valid_inds  # Store for later use
     
     # Batch sizes depend on model complexity
-    if args.model == 'samudra0' or args.nbase == 32:
-        batch_sizes = {'train': 32, 'test': 100, 'valid': 25}
+    if args.batch_size == None:
+        if args.model == 'samudra0' or args.nbase == 32:
+            batch_sizes = {'train': 32, 'test': 100, 'valid': 25}
+        else:
+            batch_sizes = {'train': 64, 'test': 200, 'valid': 50}
     else:
-        batch_sizes = {'train': 64, 'test': 200, 'valid': 50}
+        batch_sizes = {'train': args.batch_size, 'test': 200, 'valid': 50}
     
-    # Load datasets
-    # varlist = ['loggrad_T', 'U', 'V']
-    # train_data, test_data = load_datasets(
-    #     args.llc_file, varlist, train_inds, test_inds,
-    #     step0=args.step0, nframes=args.nframes
-    # )
+    if len(args.rand_trans) < 2:
+        args.rand_trans = args.rand_trans[0]
 
     train_data, val_data, test_data = make_splits(
         root=args.data_root,
@@ -554,6 +572,7 @@ def main():
         train_ratio=0.7,
         val_ratio=0,
         seed=42,
+        rand_trans = args.rand_trans,
     )
 
     train_loader, test_loader = create_dataloaders(train_data, test_data, batch_sizes=batch_sizes)
@@ -562,6 +581,36 @@ def main():
     sample_x, sample_y = next(iter(test_loader))
     n_input, n_output = sample_x.shape[1], sample_y.shape[1]
     
+    sample_x_cpu = sample_x.to("cpu").numpy()[0,:,:,:]
+    sample_y_cpu = sample_y.to("cpu").numpy()[0,:,:,:]
+
+
+    parent_dir = Path(__file__).resolve().parent
+    dir = parent_dir / 'debugplots'
+    dir.mkdir(exist_ok=True)
+    
+    plt.figure()
+    im = plt.imshow(sample_y_cpu[1,:,:])
+    plt.colorbar(im)
+    plt.savefig(dir / "y_sample_1.png")
+    plt.close()
+
+    plt.figure()
+    im = plt.imshow(sample_y_cpu[0,:,:])
+    plt.colorbar(im)
+    plt.savefig(dir / "y_sample_0.png")
+    plt.close()
+
+    plt.figure()
+    plt.imshow(sample_x_cpu[1,:,:])
+    plt.savefig(dir / "x_sample_1.png")
+    plt.close()
+
+    plt.figure()
+    plt.imshow(sample_x_cpu[0,:,:])
+    plt.savefig(dir / "x_sample_0.png")
+    plt.close()
+
     model = initialize_model(
         n_input, n_output,
         model_name=args.model,

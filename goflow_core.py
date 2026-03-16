@@ -226,15 +226,15 @@ def load_datasets(
     return train, test
 
 # Transforms for PIV dataset
-def get_transform(crop_size=(256, 256)):
+def get_transform(crop_size=(256, 256), rand_trans = 0):
     """Default transforms for training and validation."""
     train_transform = f_transforms.Compose([
-        # f_transforms.RandomTranslate(16),
-        f_transforms.RandomScale([0.95, 1.45]),
-        f_transforms.RandomHorizontalFlip(),
-        f_transforms.RandomVerticalFlip(),
-        f_transforms.Crop(crop_size, crop_type='rand',padding=[0,0,0]),
-        f_transforms.ModToTensor(),
+        f_transforms.RandomTranslate(rand_trans),
+        # f_transforms.RandomScale([0.95, 1.45]),
+        # f_transforms.RandomHorizontalFlip(),
+        # f_transforms.RandomVerticalFlip(),
+        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        # f_transforms.ModToTensor(),
         # f_transforms.RandomPhotometric(
         #     min_noise_stddev=0.0,
         #     max_noise_stddev=0.04,
@@ -249,15 +249,18 @@ def get_transform(crop_size=(256, 256)):
     ])
     
     val_transform = f_transforms.Compose([
-        f_transforms.Crop(crop_size, crop_type='center'),
-        f_transforms.ModToTensor(),
+        f_transforms.RandomTranslate(rand_trans),
+        # f_transforms.RandomScale([0.95, 1.45]),
+
+        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        # f_transforms.ModToTensor(),
     ])
     
     return train_transform, val_transform
 
 # For PIV dataset
 def make_splits(root: str, subsets: list = None, ext: str = 'tif', crop_size: tuple = (256, 256),
-                train_ratio: float = 0.7, val_ratio: float = 0.2, seed: int = 42):
+                train_ratio: float = 0.7, val_ratio: float = 0.2, seed: int = 42, rand_trans: int = 0):
     """
     Create train/val/test splits from a directory with subdirectories.
     No JSON needed - just use PyTorch's random_split.
@@ -282,7 +285,7 @@ def make_splits(root: str, subsets: list = None, ext: str = 'tif', crop_size: tu
         range(n), [n_train, n_val, n_test], generator=generator
     )
     
-    train_tf, val_tf = get_transform(crop_size)
+    train_tf, val_tf = get_transform(crop_size, rand_trans)
     
     # Wrap with transforms
     train_data = TransformSubset(base, train_idx.indices, train_tf)
@@ -351,7 +354,7 @@ MODEL_CONFIGS = {
 
 def get_model_string(model_name: str, nbase: int = 16, kernel_size: int = 5, use_grad: bool = False) -> str:
     """Generate model filename string based on configuration."""
-    prefix = 'lgt_'
+    prefix = 'goflow-piv_'
     if model_name == 'unet':
         return f'{prefix}unet{nbase}'
     elif model_name in ('samudra0', 'samudraR'):

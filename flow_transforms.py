@@ -146,8 +146,11 @@ class RandomTranslate(object):
         # Initial shape and the translation
         w, h = img_list[0].size
         th, tw = self.translation
-        tw = int(random.uniform(-tw, tw) * w / 100)
-        th = int(random.uniform(-th, th) * h / 100)
+        # tw = int(random.uniform(-tw, tw) * w / 100)
+        # th = int(random.uniform(-th, th) * h / 100)
+
+        tw = int(random.uniform(-tw, tw))
+        th = int(random.uniform(-th, th))
 
         if tw == 0 and th == 0:  # NO TRANSLATION!
             return img_list, label_list
@@ -286,7 +289,7 @@ class Crop(object):
     Crops the given PIL Image with Center or Random crop method.
     """
 
-    def __init__(self, size, crop_type: str = 'center', padding=None) -> None:
+    def __init__(self, size, crop_type: str = 'center', padding=0) -> None:
         """
         Args:
         size (sequence or int): Desired output size of the crop.
@@ -322,7 +325,7 @@ class Crop(object):
             if len(padding) != 3:
                 raise RuntimeError("padding channel is not equal with 3\n")
         else:
-            raise RuntimeError("padding in Crop() should be a number list\n")
+            self.padding = padding
 
     def __call__(self, img_list: List[Image.Image], label_list: List[np.array]
                  ) -> Tuple[List[Image.Image], List[np.array]]:
@@ -340,24 +343,30 @@ class Crop(object):
             border = (pad_w_half, pad_h_half, pad_w - pad_w_half, pad_h - pad_h_half)
 
             # Image padding
-            img_list = [
-                ImageOps.expand(img, border=border, fill=tuple([int(item) for item in self.padding]))
-                for img in img_list
-            ]
+            if isinstance(self.padding, list):
+                img_list = [
+                    ImageOps.expand(img, border=border, fill=tuple([int(item) for item in self.padding]))
+                    for img in img_list
+                ]
+            elif isinstance(self.padding, int):
+                img_list = [
+                    ImageOps.expand(img, border=border, fill=self.padding)
+                    for img in img_list
+                ]
             # Label padding
             # print(label_list[0].shape)
             if len(label_list) > 0:
                 if label_list[0].shape[2] == 3:
                     label_list = [
                         np.pad(label,
-                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half), (0, 0)),
-                               'constant') for label in label_list
+                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half),(0,0)),
+                               'edge') for label in label_list
                     ]
                 elif label_list[0].shape[2] == 2:
                     label_list = [
                         np.pad(label,
-                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half), (0, 0)),
-                               'constant') for label in label_list
+                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half),(0,0)),
+                               'edge') for label in label_list
                     ]
                 else:
                     raise RuntimeError("Cropping to larger size not supported for optical flow without mask.\n")
