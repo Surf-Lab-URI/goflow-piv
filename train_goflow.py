@@ -69,6 +69,9 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=None, help='Training batch size')
     parser.add_argument('--tcycle', type=int, default=5, help='Cosine annealing cycle length')
     parser.add_argument('--resume', action='store_true', help='Set to resume training from previous best model' )
+    parser.add_argument('--eval_criterion', type=str, default = 'r2',
+                        choices=['r2','mean'], 
+                        help='Criterion used to determin if the current model is the "best" and should be saved')
     
     # Data paths
     parser.add_argument('--llc_file', type=str, default='llcGoes_gradT_trunc.nc',
@@ -178,6 +181,7 @@ def evaluate_model(
     model.eval()
     total_r2 = 0.0
     total_spec_loss = 0.0
+    total_mean_diff = 0.0
     count = 0
     plotcount = 0
     with torch.no_grad():
@@ -185,7 +189,7 @@ def evaluate_model(
             x, y = x.to(kernel_x.device), y.to(kernel_x.device)
             y_pred = model(x)
 
-            for i in range(0,2):
+            for i in range(0,3):
                 y_cpu = y.to("cpu").numpy()[i,:,:,:]
                 x_cpu = x.to("cpu").numpy()[i,:,:,:]
                 y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
@@ -249,11 +253,12 @@ def evaluate_model(
             d = torch.sqrt(d[:,0]**2 + d[:,1]**2)
             mean_diff = torch.mean(d)
             
+            total_mean_diff +=mean_diff
             total_r2 += r2
             total_spec_loss += spec_loss.item()
             count += 1
     
-    return total_r2 / count, total_spec_loss / count, mean_diff
+    return total_r2 / count, total_spec_loss / count, total_mean_diff / count
 
 
 def train_model(
@@ -264,7 +269,7 @@ def train_model(
     criterion: nn.Module,
     config: argparse.Namespace,
     device: torch.device
-) -> tuple[nn.Module, np.ndarray]:
+) -> tuple[nn.Module, np.ndarray, np.ndarray]:
     """
     Full training loop with checkpointing and evaluation.
     
@@ -287,6 +292,7 @@ def train_model(
     best_spec = 1000
     best_mean_diff = 1e5
     r2_history = np.zeros(config.epochs)
+    mean_history = np.zeros(config.epochs)
     best_model = None
     
     for epoch in range(config.epochs):
@@ -313,15 +319,16 @@ def train_model(
         # Evaluate
         r2, spec_loss, mean_diff = evaluate_model(model, test_loader, kernel_x, kernel_y, mask, tukey_window)
         r2_history[epoch] = r2
+        mean_history[epoch] = mean_diff
         
         # Track best model
-        if r2 > best_r2:
-            best_r2 = r2
-            best_model = deepcopy(model)
+        # if r2 > best_r2:
+        #     best_r2 = r2
+        #     best_model = deepcopy(model)
             
-            # Save checkpoint and run inference
-            checkpoint_path = f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth'
-            save_model(best_model, checkpoint_path)
+        #     # Save checkpoint and run inference
+        #     checkpoint_path = f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth'
+        #     save_model(best_model, checkpoint_path)
             
             # Write test results
             # write_test_results(
@@ -340,17 +347,25 @@ def train_model(
             # write_satellite_netcdf(output_file, out_val, grad_val, sst_val,
             #                        config.valid_inds, config.goes_file)
         
+        # Track best r2, mean, spec_loss
+        if r2 > best_r2:
+            best_r2 = r2
         if spec_loss < best_spec:
             best_spec = spec_loss
-
         if mean_diff < best_mean_diff:
             best_mean_diff = mean_diff
+
+        # Track best model
+        if (config.eval_criterion == 'r2' and best_r2 == r2) or (config.eval_criterion == 'mean' and best_mean_diff == mean_diff):
+            best_model = deepcopy(model)
+            checkpoint_path = f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth'
+            save_model(best_model, checkpoint_path)
 
         
         print(f'Epoch {epoch+1}/{config.epochs} | R²: {r2:.4f} (best: {best_r2:.4f}) | '
               f'Spec: {spec_loss:.4f} (best: {best_spec:.4f}) | mean difference: {mean_diff:.4f} (best:{best_mean_diff:.4f})')
     
-    return best_model, r2_history
+    return best_model, r2_history, mean_history
 
 
 # =============================================================================
@@ -519,30 +534,8 @@ def write_test_results(
 # =============================================================================
 
 def main():
-    # Parse arguments (also support legacy positional args)
-    if len(sys.argv) > 1 and not sys.argv[1].startswith('--'):
-        # Legacy mode: cuda_count c_spec model_opt [nbase]
-        args = argparse.Namespace(
-            cuda=int(sys.argv[1]) if len(sys.argv) > 1 else 0,
-            c_spec=float(sys.argv[2]) if len(sys.argv) > 2 else 0.0,
-            model=sys.argv[3] if len(sys.argv) > 3 else 'unet',
-            nbase=int(sys.argv[4]) if len(sys.argv) > 4 else 16,
-            kernel_size=5,
-            use_grad_loss=False,
-            epochs=None,
-            lr=0.001,
-            tcycle=5,
-            llc_file='llcGoes_gradT_trunc.nc',
-            goes_file='GS_BT_NESMA2023_HiRes_SUBSECTION_grad_mask.nc',
-            output_dir='./ncfiles/',
-            nframes=3,
-            step0=1,
-            pm=5.0,
-            pn=5.0,
-        )
-        print('Using legacy argument mode')
-    else:
-        args = parse_args()
+    # Parse arguments
+    args = parse_args()
     
     # Setup device
     device = setup_device(args.cuda)
@@ -642,13 +635,14 @@ def main():
     criterion = nn.L1Loss()
     
     # Train
-    best_model, r2_history = train_model(
+    best_model, r2_history, mean_history = train_model(
         model, train_loader, test_loader,
         optimizer, criterion, args, device
     )
     
     # Save final results
     np.save(f'r2_{model_str}_ver_{args.c_spec}cs.npy', r2_history)
+    np.save(f'mean_{model_str}_ver_{args.c_spec}cs.npy', mean_history)
     save_model(best_model, f'{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs.pth')
     
     # # Final satellite inference
