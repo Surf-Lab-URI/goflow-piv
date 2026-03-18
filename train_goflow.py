@@ -22,6 +22,7 @@ from tqdm import tqdm
 from copy import deepcopy
 import matplotlib.pyplot as plt
 from pathlib import Path
+import pandas as pd
 
 
 # Local imports
@@ -69,17 +70,22 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=None, help='Training batch size')
     parser.add_argument('--tcycle', type=int, default=5, help='Cosine annealing cycle length')
     parser.add_argument('--resume', action='store_true', help='Set to resume training from previous best model' )
+    parser.add_argument('--resume_from_idx', type=int, default = None, 
+                        help='Resume training from the model with the specified index in the output directory')
+    parser.add_argument('--resume_from_file', type=str, default = None,
+                        help='Resume training from the model at the specified path')
     parser.add_argument('--eval_criterion', type=str, default = 'r2',
                         choices=['r2','mean'], 
                         help='Criterion used to determin if the current model is the "best" and should be saved')
     
     # Data paths
-    parser.add_argument('--llc_file', type=str, default='llcGoes_gradT_trunc.nc',
-                        help='LLC training data file')
+    # parser.add_argument('--llc_file', type=str, default='llcGoes_gradT_trunc.nc',
+    #                     help='LLC training data file')
     parser.add_argument('--data_root', type=str, default=None,
                         help='training dataset root directory')
-    parser.add_argument('--output_dir', type=str, default='./ncfiles/',
-                        help='Output directory for NetCDF files')
+    parser.add_argument('--output_dir', type=str, default='./output/',
+                        help='Output directory where model files will be stored and the log file will be stored.')
+    parser.add_argument('--write_log', action='store_true', help = 'Write a summary of results to a log file in the directory specified by --output_dir')
     
     # Data parameters
     parser.add_argument('--nframes', type=int, default=3, help='Number of input frames')
@@ -251,7 +257,7 @@ def evaluate_model(
             d = y_pred-y
             d = torch.mean(d,[2,3])
             d = torch.sqrt(d[:,0]**2 + d[:,1]**2)
-            mean_diff = torch.mean(d)
+            mean_diff = to_numpy(torch.mean(d))[0]
             
             total_mean_diff +=mean_diff
             total_r2 += r2
@@ -355,12 +361,35 @@ def train_model(
         if mean_diff < best_mean_diff:
             best_mean_diff = mean_diff
 
+
         # Track best model
         if (config.eval_criterion == 'r2' and best_r2 == r2) or (config.eval_criterion == 'mean' and best_mean_diff == mean_diff):
             best_model = deepcopy(model)
-            checkpoint_path = f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth'
+            if config.write_log:
+                checkpoint_path = os.path.join(config.output_dir, f'{config.exp_idx}.pth')
+                config.logdf.loc[config.exp_idx, 'best_model_file'] = checkpoint_path
+                config.logdf.loc[config.exp_idx, 'mean'] = mean_diff
+                config.logdf.loc[config.exp_idx, 'r2'] = r2
+                config.logdf.loc[config.exp_idx, 'spec'] = spec_loss
+                config.logdf.loc[config.exp_idx, 'epoch_best'] = epoch + 1
+                config.logdf.to_csv(config.logpath)
+                print('Updated log file with new best model')
+                # print(config.logdf)
+            else:
+                checkpoint_path = os.path.join(config.output_dir,f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth')
+            
             save_model(best_model, checkpoint_path)
+            # Write test results
+            if config.write_log:
+                nc_fname = f"{config.exp_idx}.nc"
+            else:
+                nc_fname = f"test_{model_str}_{config.c_spec}cspec.nc"
+            write_test_results(
+                epoch, best_model, test_loader, kernel_x, kernel_y, nc_fname, config.output_dir
+            )
 
+        config.logdf.loc[config.exp_idx,'epochs'] = epoch + 1
+        config.logdf.to_csv(config.logpath)
         
         print(f'Epoch {epoch+1}/{config.epochs} | R²: {r2:.4f} (best: {best_r2:.4f}) | '
               f'Spec: {spec_loss:.4f} (best: {best_spec:.4f}) | mean difference: {mean_diff:.4f} (best:{best_mean_diff:.4f})')
@@ -372,88 +401,88 @@ def train_model(
 # Satellite Data Processing
 # =============================================================================
 
-def run_satellite_inference(
-    model: nn.Module,
-    goes_file: str,
-    valid_inds: tuple,
-    pm: float,
-    pn: float,
-    batch_size: int = 4
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Run inference on GOES satellite data.
+# def run_satellite_inference(
+#     model: nn.Module,
+#     goes_file: str,
+#     valid_inds: tuple,
+#     pm: float,
+#     pn: float,
+#     batch_size: int = 4
+# ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+#     """
+#     Run inference on GOES satellite data.
     
-    Returns:
-        Tuple of (velocities, gradient_fields, sst_data)
-    """
-    device = next(model.parameters()).device
-    kernel_x = dx_kernel(pm).to(device)
-    kernel_y = dy_kernel(pn).to(device)
+#     Returns:
+#         Tuple of (velocities, gradient_fields, sst_data)
+#     """
+#     device = next(model.parameters()).device
+#     kernel_x = dx_kernel(pm).to(device)
+#     kernel_y = dy_kernel(pn).to(device)
     
-    goes_dataset = SatelliteDataset(goes_file, ['log_gradT'], valid_inds, train=False)
-    goes_loader = DataLoader(goes_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+#     goes_dataset = SatelliteDataset(goes_file, ['log_gradT'], valid_inds, train=False)
+#     goes_loader = DataLoader(goes_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     
-    out_list = []
-    grad_list = []
-    sst_list = []
+#     out_list = []
+#     grad_list = []
+#     sst_list = []
     
-    model.eval()
-    with torch.no_grad():
-        for sst in tqdm(goes_loader, desc='Satellite inference'):
-            # Store input SST
-            sst_list.append(sst[:, 1, :, :].cpu().numpy()[:, None, :, :])
+#     model.eval()
+#     with torch.no_grad():
+#         for sst in tqdm(goes_loader, desc='Satellite inference'):
+#             # Store input SST
+#             sst_list.append(sst[:, 1, :, :].cpu().numpy()[:, None, :, :])
             
-            sst = sst.to(device)
-            out = model(sst)
-            out_list.append(out.cpu().numpy())
+#             sst = sst.to(device)
+#             out = model(sst)
+#             out_list.append(out.cpu().numpy())
             
-            # Compute gradient fields
-            ux, uy, vx, vy = compute_velocity_gradients(out, kernel_x, kernel_y)
-            vort, div, strain = compute_derived_fields(ux, uy, vx, vy)
-            grad_list.append(torch.stack((vort, div, strain), dim=1).cpu().numpy())
+#             # Compute gradient fields
+#             ux, uy, vx, vy = compute_velocity_gradients(out, kernel_x, kernel_y)
+#             vort, div, strain = compute_derived_fields(ux, uy, vx, vy)
+#             grad_list.append(torch.stack((vort, div, strain), dim=1).cpu().numpy())
     
-    out_val = np.concatenate(out_list, axis=0)
-    grad_val = np.concatenate(grad_list, axis=0)
-    sst_val = np.concatenate(sst_list, axis=0).squeeze()
+#     out_val = np.concatenate(out_list, axis=0)
+#     grad_val = np.concatenate(grad_list, axis=0)
+#     sst_val = np.concatenate(sst_list, axis=0).squeeze()
     
-    return out_val, grad_val, sst_val
+#     return out_val, grad_val, sst_val
 
 
 # =============================================================================
 # NetCDF Output
 # =============================================================================
 
-def write_satellite_netcdf(
-    output_file: str,
-    out_val: np.ndarray,
-    grad_val: np.ndarray,
-    sst_val: np.ndarray,
-    valid_inds: tuple,
-    goes_file: str
-):
-    """Write satellite prediction results to NetCDF."""
-    nt, _, ny, nx = out_val.shape
-    print(f'Writing {output_file}: shape=({nt}, {ny}, {nx})')
+# def write_satellite_netcdf(
+#     output_file: str,
+#     out_val: np.ndarray,
+#     grad_val: np.ndarray,
+#     sst_val: np.ndarray,
+#     valid_inds: tuple,
+#     goes_file: str
+# ):
+#     """Write satellite prediction results to NetCDF."""
+#     nt, _, ny, nx = out_val.shape
+#     print(f'Writing {output_file}: shape=({nt}, {ny}, {nx})')
     
-    with NCDataset(goes_file, 'r') as nch:
-        varnames = ['U', 'V', 'Vorticity', 'Divergence', 'Strain', 'BT', 'loggrad_BT']
-        nc = ncCreate(output_file, nx, ny, varnames, dt=2)
+#     with NCDataset(goes_file, 'r') as nch:
+#         varnames = ['U', 'V', 'Vorticity', 'Divergence', 'Strain', 'BT', 'loggrad_BT']
+#         nc = ncCreate(output_file, nx, ny, varnames, dt=2)
         
-        for it in tqdm(range(nt), desc='Writing NetCDF'):
-            BT = nch.variables['BT'][it + 12, 
-                                     valid_inds[0]:valid_inds[1],
-                                     valid_inds[2]:valid_inds[3]]
-            addVal(nc, 'U', out_val[it, 0, :, :], it)
-            addVal(nc, 'V', out_val[it, 1, :, :], it)
-            addVal(nc, 'Vorticity', grad_val[it, 0, :, :], it)
-            addVal(nc, 'Divergence', grad_val[it, 1, :, :], it)
-            addVal(nc, 'Strain', grad_val[it, 2, :, :], it)
-            addVal(nc, 'BT', BT, it)
-            addVal(nc, 'loggrad_BT', sst_val[it, :, :], it)
+#         for it in tqdm(range(nt), desc='Writing NetCDF'):
+#             BT = nch.variables['BT'][it + 12, 
+#                                      valid_inds[0]:valid_inds[1],
+#                                      valid_inds[2]:valid_inds[3]]
+#             addVal(nc, 'U', out_val[it, 0, :, :], it)
+#             addVal(nc, 'V', out_val[it, 1, :, :], it)
+#             addVal(nc, 'Vorticity', grad_val[it, 0, :, :], it)
+#             addVal(nc, 'Divergence', grad_val[it, 1, :, :], it)
+#             addVal(nc, 'Strain', grad_val[it, 2, :, :], it)
+#             addVal(nc, 'BT', BT, it)
+#             addVal(nc, 'loggrad_BT', sst_val[it, :, :], it)
         
-        nc.close()
+#         nc.close()
     
-    writeGridSat(goes_file, output_file, valid_inds)
+#     writeGridSat(goes_file, output_file, valid_inds)
 
 
 def write_test_results(
@@ -462,9 +491,8 @@ def write_test_results(
     test_loader: DataLoader,
     kernel_x: torch.Tensor,
     kernel_y: torch.Tensor,
-    c_spec: float,
-    model_str: str,
-    output_dir: str = './ncfiles/'
+    output_fname: str,
+    output_dir: str = './output/'
 ):
     """Write test set predictions and gradient fields to NetCDF."""
     model.eval()
@@ -503,14 +531,14 @@ def write_test_results(
     
     # Write NetCDF
     os.makedirs(output_dir, exist_ok=True)
-    nc_filename = os.path.join(output_dir, f'test_{model_str}_{c_spec}cspec.nc')
+    nc_filename = os.path.join(output_dir, f'{output_fname}')
     
     Nt, Ny, Nx = inputs.shape
-    varlist = ['gradT', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
+    varlist = ['inputs', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
                'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
     
     with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
-        nc.variables['gradT'][:] = inputs
+        nc.variables['inputs'][:] = inputs
         nc.variables['U_inp'][:] = targets[:, 0, :, :]
         nc.variables['V_inp'][:] = targets[:, 1, :, :]
         nc.variables['U_out'][:] = outputs[:, 0, :, :]
@@ -523,7 +551,7 @@ def write_test_results(
         nc.variables['strain_out'][:] = pred_grads[:, 2, :, :]
         
         nc.description = f'Test set results for epoch {epoch}'
-        nc.input_field = 'SST gradient (middle time step)'
+        nc.input_field = 'input'
         nc.output_fields = 'Vorticity, Divergence, Strain (target and predicted)'
     
     print(f'Test results written to {nc_filename}')
@@ -536,6 +564,61 @@ def write_test_results(
 def main():
     # Parse arguments
     args = parse_args()
+    args_dict = vars(args)
+    args_string = str(args_dict)
+
+    if args.resume_from_file or args.resume_from_idx:
+        args.resume = True
+
+    if args.write_log:
+        # Start log file
+        log_dict = {
+            'exp_idx': None,
+            'model': args.model,
+            'batch_size': args.batch_size,
+            'c_spec': args.c_spec,
+            'use_grad': args.use_grad_loss,
+            'epochs': 0,
+            'resume_file': None,
+            'rand_trans': str(args.rand_trans),
+            'eval_criterion': args.eval_criterion,
+            'epoch_best': None,
+            'mean': None,
+            'r2': None,
+            'spec': None,
+            'best_model_file': '',
+            'args_string':args_string
+        }
+        columns_list = list(log_dict.keys())
+
+        logpath = Path(f"{args.output_dir}/logfile.csv")
+        if logpath.is_file():
+            print(f"logfile exists at {logpath}")
+            logdf = pd.read_csv(logpath, index_col = False)
+            print(logdf)
+            exp_idx = len(logdf)
+            log_dict['exp_idx'] = exp_idx
+            for c in range(len(columns_list)):
+                if columns_list[c] not in logdf.columns:
+                    if c <= len(logdf.columns):
+                        logdf.insert(c,columns_list[c],None,allow_duplicates=False)
+                    else:
+                        logdf.insert(len(logdf.columns),columns_list[c],None,allow_duplicates=False)
+                    print(f'Added missing column {columns_list[c]} to the log file')
+            
+        else:
+            print(f"no logfile exists at {logpath}. One will be generated.")
+            logdf = pd.DataFrame(columns = columns_list)
+            exp_idx = 0
+
+        for k, v in log_dict.items():
+            logdf.loc[exp_idx,k] = v
+        logdf = logdf.astype({'exp_idx': 'int'})
+        logdf.set_index('exp_idx',inplace = True)
+        logdf.to_csv(logpath)
+        args.exp_idx = exp_idx
+        args.logpath = logpath
+        args.logdf = logdf
     
     # Setup device
     device = setup_device(args.cuda)
@@ -614,13 +697,29 @@ def main():
     
     # Load pretrained weights if using spectral loss or if '--resume' flag is set to true
     model_str = get_model_string(args.model, args.nbase, args.kernel_size, args.use_grad_loss)
-    if args.c_spec > 0 or args.resume:
-        stage0_file = f'{model_str}_{args.step0}_{args.nframes}_0.0cs.pth'
-        if os.path.exists(stage0_file):
-            model = load_model(model, stage0_file, device)
-        else:
-            print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
+    if args.resume: #formerly also triggered by c_spec > 0, but that restricts what you can do a bit.
+        if args.write_log and args.resume: #if write_log option is set, find the previous model listed in the log file.
+            if args.resume_from_idx:
+                stage0_file = f'{logdf.loc[args.resume_from_idx,'best_model_file']}'
+            elif args.resume_from_file:
+                stage0_file = args.resume_from_file
+            elif exp_idx > 0:
+                stage0_file = f'{logdf.loc[exp_idx-1,'best_model_file']}'
 
+            if os.path.exists(stage0_file):
+                model = load_model(model, stage0_file, device)
+                logdf.loc[exp_idx,'resume_file'] = stage0_file
+            else:
+                print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
+
+        else: # otherwise just go with the default naming
+            stage0_file = f'{model_str}_{args.step0}_{args.nframes}_0.0cs.pth'
+            if os.path.exists(stage0_file):
+                model = load_model(model, stage0_file, device)
+            else:
+                print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
+        
+    print(logdf)
 
     # Setup optimizer
     optimizer = torch.optim.AdamW(
@@ -641,9 +740,14 @@ def main():
     )
     
     # Save final results
-    np.save(f'r2_{model_str}_ver_{args.c_spec}cs.npy', r2_history)
-    np.save(f'mean_{model_str}_ver_{args.c_spec}cs.npy', mean_history)
-    save_model(best_model, f'{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs.pth')
+    if args.write_log:
+        np.save(f'{exp_idx}_r2.npy', r2_history)
+        np.save(f'{exp_idx}_mean.npy', mean_history)
+        # save_model(best_model, f'{exp_idx}.pth')
+    else:
+        np.save(f'r2_{model_str}_ver_{args.c_spec}cs.npy', r2_history)
+        np.save(f'mean_{model_str}_ver_{args.c_spec}cs.npy', mean_history)
+        # save_model(best_model, f'{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs.pth')
     
     # # Final satellite inference
     # out_val, grad_val, sst_val = run_satellite_inference(
