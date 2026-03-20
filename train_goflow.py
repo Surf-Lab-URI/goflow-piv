@@ -366,7 +366,7 @@ def train_model(
         if (config.eval_criterion == 'r2' and best_r2 == r2) or (config.eval_criterion == 'mean' and best_mean_diff == mean_diff):
             best_model = deepcopy(model)
             if config.write_log:
-                checkpoint_path = os.path.join(config.output_dir, f'{config.exp_idx}.pth')
+                checkpoint_path = os.path.join(config.output_subdir, f'{config.exp_idx}.pth')
                 config.logdf.loc[config.exp_idx, 'best_model_file'] = checkpoint_path
                 config.logdf.loc[config.exp_idx, 'mean'] = mean_diff
                 config.logdf.loc[config.exp_idx, 'r2'] = r2
@@ -376,16 +376,16 @@ def train_model(
                 print('Updated log file with new best model')
                 # print(config.logdf)
             else:
-                checkpoint_path = os.path.join(config.output_dir,f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth')
+                checkpoint_path = os.path.join(config.output_subdir,f'{model_str}_{config.step0}_{config.nframes}_{config.c_spec}cs.pth')
             
             save_model(best_model, checkpoint_path)
             # Write test results
             if config.write_log:
-                nc_fname = f"{config.exp_idx}.nc"
+                output_prefix = config.output_subdir
             else:
-                nc_fname = f"test_{model_str}_{config.c_spec}cspec.nc"
+                output_prefix = os.path.join(config.output_subdir, f"test_{model_str}_{config.c_spec}cspec")
             write_test_results(
-                epoch, best_model, test_loader, kernel_x, kernel_y, nc_fname, config.output_dir
+                epoch, best_model, test_loader, kernel_x, kernel_y, output_prefix
             )
 
         config.logdf.loc[config.exp_idx,'epochs'] = epoch + 1
@@ -491,8 +491,7 @@ def write_test_results(
     test_loader: DataLoader,
     kernel_x: torch.Tensor,
     kernel_y: torch.Tensor,
-    output_fname: str,
-    output_dir: str = './output/'
+    output_prefix: str
 ):
     """Write test set predictions and gradient fields to NetCDF."""
     model.eval()
@@ -503,7 +502,10 @@ def write_test_results(
     targets_list = []
     true_grads_list = []
     pred_grads_list = []
-    
+
+    #make results directory
+    os.makedirs(output_prefix, exist_ok=True)
+
     with torch.no_grad():
         for x, y_true in tqdm(test_loader, desc='Processing test set'):
             x, y_true = x.to(device), y_true.to(device)
@@ -516,29 +518,76 @@ def write_test_results(
             vort_true, div_true, strain_true = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
             vort_pred, div_pred, strain_pred = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
             
-            inputs_list.append(x[:, 1, :, :].cpu().numpy())
+            inputs_list.append(x.cpu().numpy())
             outputs_list.append(y_pred.cpu().numpy())
             targets_list.append(y_true.cpu().numpy())
             true_grads_list.append(torch.stack((vort_true, div_true, strain_true), dim=1).cpu().numpy())
             pred_grads_list.append(torch.stack((vort_pred, div_pred, strain_pred), dim=1).cpu().numpy())
-    
+        
+
     # Concatenate batches
     inputs = np.concatenate(inputs_list, axis=0)
     outputs = np.concatenate(outputs_list, axis=0)
     targets = np.concatenate(targets_list, axis=0)
     true_grads = np.concatenate(true_grads_list, axis=0)
     pred_grads = np.concatenate(pred_grads_list, axis=0)
+
+    plotcount = 0
+    num_tests_recorded = 5
+    for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):      
+        plt.figure()
+        im = plt.imshow(outputs[i,0,:,:])
+        cbar = plt.colorbar(im)
+        cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+        plt.title('Inference')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}upred.png"))
+        plt.close()
+
+        plt.figure()
+        im = plt.imshow(targets[i,0,:,:])
+        cbar = plt.colorbar(im)
+        cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+        plt.title('Target')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}utarget.png"))
+        plt.close()
+
+        plt.figure()
+        im = plt.imshow(outputs[i,1,:,:])
+        cbar = plt.colorbar(im)
+        cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+        plt.title('Inference')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}vpred.png"))
+        plt.close()
+
+        plt.figure()
+        im = plt.imshow(targets[i,1,:,:])
+        cbar = plt.colorbar(im)
+        cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+        plt.title('Target')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}vtarget.png"))
+        plt.close()
+
+        plt.figure()
+        plt.imshow(inputs[i,1,:,:], cmap='gray')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}im1.png"))
+        plt.close()
+
+        plt.figure()
+        plt.imshow(inputs[i,0,:,:], cmap='gray')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}im0.png"))
+        plt.close()
+        plotcount += 1
     
     # Write NetCDF
-    os.makedirs(output_dir, exist_ok=True)
-    nc_filename = os.path.join(output_dir, f'{output_fname}')
+    nc_filename = os.path.join(output_prefix, f'results.nc')
     
-    Nt, Ny, Nx = inputs.shape
-    varlist = ['inputs', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
+    Nt, Nimg, Ny, Nx = inputs.shape
+    varlist = ['img_0','img_1', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
                'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
     
     with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
-        nc.variables['inputs'][:] = inputs
+        nc.variables['img_0'][:] = inputs[:,0,:,:]
+        nc.variables['img_1'][:] = inputs[:,1,:,:]
         nc.variables['U_inp'][:] = targets[:, 0, :, :]
         nc.variables['V_inp'][:] = targets[:, 1, :, :]
         nc.variables['U_out'][:] = outputs[:, 0, :, :]
@@ -575,10 +624,12 @@ def main():
         log_dict = {
             'exp_idx': None,
             'model': args.model,
+            'lr': args.lr,
             'batch_size': args.batch_size,
             'c_spec': args.c_spec,
             'use_grad': args.use_grad_loss,
             'epochs': 0,
+            'data_root': args.data_root,
             'resume_file': None,
             'rand_trans': str(args.rand_trans),
             'eval_criterion': args.eval_criterion,
@@ -590,7 +641,8 @@ def main():
             'args_string':args_string
         }
         columns_list = list(log_dict.keys())
-
+        
+        os.makedirs(args.output_dir, exist_ok=True)
         logpath = Path(f"{args.output_dir}/logfile.csv")
         if logpath.is_file():
             print(f"logfile exists at {logpath}")
@@ -610,7 +662,10 @@ def main():
             print(f"no logfile exists at {logpath}. One will be generated.")
             logdf = pd.DataFrame(columns = columns_list)
             exp_idx = 0
-
+            log_dict['exp_idx'] = exp_idx
+            
+        logdf = logdf.astype({'resume_file': 'str'})
+        logdf = logdf.astype({'data_root': 'str'})
         for k, v in log_dict.items():
             logdf.loc[exp_idx,k] = v
         logdf = logdf.astype({'exp_idx': 'int'})
@@ -619,6 +674,15 @@ def main():
         args.exp_idx = exp_idx
         args.logpath = logpath
         args.logdf = logdf
+
+        args.output_subdir = os.path.join(args.output_dir, f'{args.exp_idx}')
+
+    else:
+        args.output_subdir = args.output_dir
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_subdir, exist_ok=True)
+
     
     # Setup device
     device = setup_device(args.cuda)
@@ -708,6 +772,7 @@ def main():
 
             if os.path.exists(stage0_file):
                 model = load_model(model, stage0_file, device)
+                logdf = logdf.astype({'resume_file': 'str'})
                 logdf.loc[exp_idx,'resume_file'] = stage0_file
             else:
                 print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
@@ -720,6 +785,8 @@ def main():
                 print(f'Warning: Stage 0 checkpoint {stage0_file} not found, starting from scratch')
         
     print(logdf)
+    logdf.to_csv(logpath)
+    args.logdf = logdf
 
     # Setup optimizer
     optimizer = torch.optim.AdamW(
@@ -741,12 +808,12 @@ def main():
     
     # Save final results
     if args.write_log:
-        np.save(f'{exp_idx}_r2.npy', r2_history)
-        np.save(f'{exp_idx}_mean.npy', mean_history)
+        np.save(os.path.join(args.output_subdir, 'r2.npy'), r2_history)
+        np.save(os.path.join(args.output_subdir, 'mean.npy'), mean_history)
         # save_model(best_model, f'{exp_idx}.pth')
     else:
-        np.save(f'r2_{model_str}_ver_{args.c_spec}cs.npy', r2_history)
-        np.save(f'mean_{model_str}_ver_{args.c_spec}cs.npy', mean_history)
+        np.save(os.path.join(args.output_subdir, f'r2_{model_str}_ver_{args.c_spec}cs.npy'), r2_history)
+        np.save(os.path.join(args.output_subdir, f'mean_{model_str}_ver_{args.c_spec}cs.npy'), mean_history)
         # save_model(best_model, f'{model_str}_{args.step0}_{args.nframes}_{args.c_spec}cs.pth')
     
     # # Final satellite inference
