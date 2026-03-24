@@ -666,6 +666,7 @@ def main():
             
         logdf = logdf.astype({'resume_file': 'str'})
         logdf = logdf.astype({'data_root': 'str'})
+        logdf = logdf.astype({'best_model_file':'str'})
         for k, v in log_dict.items():
             logdf.loc[exp_idx,k] = v
         logdf = logdf.astype({'exp_idx': 'int'})
