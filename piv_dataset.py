@@ -33,10 +33,16 @@ class TransformSubset(Dataset):
     def __getitem__(self, idx):
         img1_path, img2_path, flow_path = self.dataset.samples[self.indices[idx]]
         
-        img1 = Image.open(img1_path)#.convert('RGB')
-        img2 = Image.open(img2_path)#.convert('RGB')
-        flow = read_flow(flow_path)
+        if not img2_path:
+            img1 = Image.open(img1_path)
+            img2 = img1.copy()
+            w,h = img1.size
+            flow = np.zeros((h,w,2),dtype=np.float32)
 
+        else:
+            img1 = Image.open(img1_path)
+            img2 = Image.open(img2_path)
+            flow = read_flow(flow_path)
         
         imglist, flow = self.transform([img1, img2], [flow])
         flow = flow[0]
@@ -92,7 +98,7 @@ class PIVDataset(Dataset):
         samples = []
         
         # Get subdirectories to scan
-        if subsets is not None:
+        if (subsets is not None) and (len(subsets) > 0):
             dirs = [root / s for s in subsets]
         else:
             dirs = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith('.')]
@@ -104,15 +110,22 @@ class PIVDataset(Dataset):
             if not subdir.exists():
                 print(f"Warning: {subdir} does not exist, skipping")
                 continue
-                
-            for flo_path in sorted(subdir.glob('*_flow.flo')):
-                # DNS_turbulence_00500_flow.flo -> DNS_turbulence_00500
-                name = flo_path.stem.rsplit('_flow', 1)[0]
-                img1 = subdir / f'{name}_img1.{ext}'
-                img2 = subdir / f'{name}_img2.{ext}'
-                
-                if img1.exists() and img2.exists():
-                    samples.append((str(img1), str(img2), str(flo_path)))
+
+            if len(list(subdir.glob('*_flow.flo'))) > 0:
+                for flo_path in sorted(subdir.glob('*_flow.flo')):
+                    # DNS_turbulence_00500_flow.flo -> DNS_turbulence_00500
+                    name = flo_path.stem.rsplit('_flow', 1)[0]
+                    img1 = subdir / f'{name}_img1.{ext}'
+                    img2 = subdir / f'{name}_img2.{ext}'
+                    
+                    if img1.exists() and img2.exists():
+                        samples.append((str(img1), str(img2), str(flo_path)))
+            # else, if flow files aren't provide:
+            else:
+                for im_path in sorted(subdir.glob(f'*.{ext}')):
+                    if im_path.exists():
+                        samples.append((str(im_path), '', ''))
+
         
         return samples
     
