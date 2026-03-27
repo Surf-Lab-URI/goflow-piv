@@ -43,13 +43,15 @@ class TransformSubset(Dataset):
             img1 = Image.open(img1_path)
             img2 = Image.open(img2_path)
             flow = read_flow(flow_path)
+
+        mask = np.full(img1.size, True);
         
-        imglist, flow = self.transform([img1, img2], [flow])
+        imglist, flow, mask = self.transform([img1, img2], [flow], mask)
         flow = flow[0]
         imgs = np.stack(imglist, axis=0, dtype = np.float32)
         flow = np.stack([flow[:,:,0],flow[:,:,1]], axis=0)
         
-        return imgs, flow
+        return imgs, flow, mask
 
 class PIVDataset(Dataset):
     """

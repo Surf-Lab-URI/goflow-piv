@@ -303,7 +303,7 @@ def create_dataloaders(
     test_dataset,
     valid_dataset=None,
     batch_sizes: dict = None,
-    num_workers: int = 5
+    num_workers: int = 5 # mess with this and see what's fastest
 ):
     """
     Create DataLoader objects for train/test/validation.

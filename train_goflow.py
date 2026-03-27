@@ -137,24 +137,26 @@ def train_epoch(
     """
     model.train()
     first_batch_losses = None
-    
-    for ib, (x, y) in enumerate(tqdm(train_loader, desc='Training')):
-        x, y = x.to(kernel_x.device), y.to(kernel_x.device)
-        
+    # loop through batches. each iteration, load a batches worth of inputs (x),
+    # targets (y), and input-specific masks (m).
+    for ib, (x, y, m) in enumerate(tqdm(train_loader, desc='Training')):
+        x, y, m = x.to(kernel_x.device), y.to(kernel_x.device), m.to(kernel_x.device)
+        ms = torch.transpose(torch.stack((m, m), dim = 0),0,1)
+
         y_pred = model(x)
         
         # Pointwise L1 loss with boundary masking
         loss_l1 = criterion(
-            y.squeeze() * mask[None, None, :, :],
-            y_pred.squeeze() * mask[None, None, :, :]
+            y.squeeze() * ms.squeeze() * mask[None, None, :, :],
+            y_pred.squeeze() * ms.squeeze() * mask[None, None, :, :]
         )
         
         # Auxiliary loss (gradient or spectral)
         if use_grad_loss:
-            loss_aux = gradient_loss(y_pred.squeeze(), y.squeeze(), criterion, 
+            loss_aux = gradient_loss(y_pred.squeeze()*ms.squeeze(), y.squeeze()*ms.squeeze(), criterion, 
                                      mask, kernel_x, kernel_y)
         else:
-            loss_aux = spectral_loss(y_pred, y, tukey_window)
+            loss_aux = spectral_loss(y_pred*ms, y*ms, tukey_window)
         
         # Combined loss
         loss = (1 - c_spec) * loss_l1 + c_spec * loss_aux
@@ -191,9 +193,11 @@ def evaluate_model(
     count = 0
     plotcount = 0
     with torch.no_grad():
-        for x, y in tqdm(test_loader, desc='Evaluating'):
-            x, y = x.to(kernel_x.device), y.to(kernel_x.device)
+        for x, y, m in tqdm(test_loader, desc='Evaluating'):
+            x, y, m = x.to(kernel_x.device), y.to(kernel_x.device), m.to(kernel_x.device)
+            ms = torch.transpose(torch.stack((m, m), dim = 0),0,1)
             y_pred = model(x)
+
 
             for i in range(0,3):
                 y_cpu = y.to("cpu").numpy()[i,:,:,:]
@@ -248,13 +252,13 @@ def evaluate_model(
 
 
             # Spectral loss
-            spec_loss = spectral_loss(y_pred, y, tukey_window)
+            spec_loss = spectral_loss(y_pred*ms, y*ms, tukey_window)
             
             # R² on gradient fields (vorticity + strain)
-            r2 = compute_gradient_r2(y, y_pred, kernel_x, kernel_y, mask)
+            r2 = compute_gradient_r2(y*ms, y_pred*ms, kernel_x, kernel_y, mask)
 
             # Calculate mean error in the mean
-            d = y_pred-y
+            d = y_pred*ms-y*ms
             d = torch.mean(d,[2,3])
             d = torch.sqrt(d[:,0]**2 + d[:,1]**2)
             mean_diff = to_numpy(torch.mean(d))[0]
@@ -308,7 +312,7 @@ def train_model(
         
         # Initialize mask/window on first epoch using data shape
         if mask is None:
-            sample_x, sample_y = next(iter(train_loader))
+            sample_x, sample_y, m = next(iter(train_loader))
             shape = sample_y.shape[-2:]
             mask = create_boundary_mask(shape).to(device)
             tukey_window = create_tukey_window(shape).to(device)
@@ -500,6 +504,7 @@ def write_test_results(
     inputs_list = []
     outputs_list = []
     targets_list = []
+    masks_list = []
     true_grads_list = []
     pred_grads_list = []
 
@@ -507,8 +512,8 @@ def write_test_results(
     os.makedirs(output_prefix, exist_ok=True)
 
     with torch.no_grad():
-        for x, y_true in tqdm(test_loader, desc='Processing test set'):
-            x, y_true = x.to(device), y_true.to(device)
+        for x, y_true, m in tqdm(test_loader, desc='Processing test set'):
+            x, y_true, m = x.to(device), y_true.to(device), m.to(device)
             y_pred = model(x)
             
             # Compute gradients
@@ -521,6 +526,7 @@ def write_test_results(
             inputs_list.append(x.cpu().numpy())
             outputs_list.append(y_pred.cpu().numpy())
             targets_list.append(y_true.cpu().numpy())
+            masks_list.append(m.cpu().numpy())
             true_grads_list.append(torch.stack((vort_true, div_true, strain_true), dim=1).cpu().numpy())
             pred_grads_list.append(torch.stack((vort_pred, div_pred, strain_pred), dim=1).cpu().numpy())
         
@@ -529,6 +535,7 @@ def write_test_results(
     inputs = np.concatenate(inputs_list, axis=0)
     outputs = np.concatenate(outputs_list, axis=0)
     targets = np.concatenate(targets_list, axis=0)
+    masks = np.concatenate(masks_list, axis=0)
     true_grads = np.concatenate(true_grads_list, axis=0)
     pred_grads = np.concatenate(pred_grads_list, axis=0)
 
@@ -582,12 +589,13 @@ def write_test_results(
     nc_filename = os.path.join(output_prefix, f'results.nc')
     
     Nt, Nimg, Ny, Nx = inputs.shape
-    varlist = ['img_0','img_1', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
+    varlist = ['img_0','img_1','mask','U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
                'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
     
     with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
         nc.variables['img_0'][:] = inputs[:,0,:,:]
         nc.variables['img_1'][:] = inputs[:,1,:,:]
+        nc.variables['mask'][:] = masks[:,:,:]
         nc.variables['U_inp'][:] = targets[:, 0, :, :]
         nc.variables['V_inp'][:] = targets[:, 1, :, :]
         nc.variables['U_out'][:] = outputs[:, 0, :, :]
@@ -719,7 +727,7 @@ def main():
     train_loader, test_loader = create_dataloaders(train_data, test_data, batch_sizes=batch_sizes)
     
     # Initialize model
-    sample_x, sample_y = next(iter(test_loader))
+    sample_x, sample_y, m = next(iter(test_loader))
     n_input, n_output = sample_x.shape[1], sample_y.shape[1]
     
     sample_x_cpu = sample_x.to("cpu").numpy()[0,:,:,:]
@@ -752,14 +760,14 @@ def main():
     plt.savefig(dir / "x_sample_0.png")
     plt.close()
 
-    model = initialize_model(
+    model_prev = initialize_model(
         n_input, n_output,
         model_name=args.model,
         nbase=args.nbase,
         kernel_size=args.kernel_size,
         device=device
     )
-    
+    model = torch.compile(model_prev)
     # Load pretrained weights if using spectral loss or if '--resume' flag is set to true
     model_str = get_model_string(args.model, args.nbase, args.kernel_size, args.use_grad_loss)
     if args.resume: #formerly also triggered by c_spec > 0, but that restricts what you can do a bit.

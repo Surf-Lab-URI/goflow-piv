@@ -132,8 +132,8 @@ class RandomTranslate(object):
         else:  # Same translation for both axis
             self.translation = translation
 
-    def __call__(self, img_list: List[Image.Image], label_list: List[np.array]
-                 ) -> Tuple[List[Image.Image], List[np.array]]:
+    def __call__(self, img_list: List[Image.Image], label_list: List[np.array], mask: np.ndarray
+                 ) -> Tuple[List[Image.Image], List[np.array], np.ndarray]:
         """
         Args:
             img_list: Pair of input images (img1 and img2)
@@ -149,11 +149,11 @@ class RandomTranslate(object):
         # tw = int(random.uniform(-tw, tw) * w / 100)
         # th = int(random.uniform(-th, th) * h / 100)
 
-        tw = int(random.uniform(-tw, tw))
+        tw = int(random.uniform(-tw, tw)) # this shouldn't be int, should randomly choose theta and speed
         th = int(random.uniform(-th, th))
 
         if tw == 0 and th == 0:  # NO TRANSLATION!
-            return img_list, label_list
+            return img_list, label_list, mask
 
         # compute x1_a, x2_a, y1_a, y2_a for img1 and target
         #   and x1_b,x2_b,y1_b,y2_b for img2
@@ -163,12 +163,15 @@ class RandomTranslate(object):
         img_list[0] = img_list[0].crop((x1_a, y1_a, x2_a, y2_a))
         img_list[1] = img_list[1].crop((x1_b, y1_b, x2_b, y2_b))
 
+        if mask is not None:
+            mask = mask[y1_a:y2_a, x1_a:x2_a];
+
         if len(label_list) == 1:
             label_list[0] = label_list[0][y1_a:y2_a, x1_a:x2_a]
             label_list[0][:, :, 0] += tw
             label_list[0][:, :, 1] += th
 
-        return img_list, label_list
+        return img_list, label_list, mask
 
 
 class RandomRotate(object):
@@ -327,8 +330,8 @@ class Crop(object):
         else:
             self.padding = padding
 
-    def __call__(self, img_list: List[Image.Image], label_list: List[np.array]
-                 ) -> Tuple[List[Image.Image], List[np.array]]:
+    def __call__(self, img_list: List[Image.Image], label_list: List[np.array], mask: np.ndarray
+                 ) -> Tuple[List[Image.Image], List[np.array], np.ndarray]:
         w, h = img_list[0].size
         pad_h = max(self.crop_h - h, 0)
         pad_w = max(self.crop_w - w, 0)
@@ -356,20 +359,14 @@ class Crop(object):
             # Label padding
             # print(label_list[0].shape)
             if len(label_list) > 0:
-                if label_list[0].shape[2] == 3:
-                    label_list = [
-                        np.pad(label,
-                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half),(0,0)),
-                               'edge') for label in label_list
-                    ]
-                elif label_list[0].shape[2] == 2:
-                    label_list = [
-                        np.pad(label,
-                               ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half),(0,0)),
-                               'edge') for label in label_list
-                    ]
-                else:
-                    raise RuntimeError("Cropping to larger size not supported for optical flow without mask.\n")
+                label_list = [
+                    np.pad(label,
+                            ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half),(0,0)),
+                            'edge') for label in label_list
+                ]
+            #Set mask to zero in padding area
+            if mask is not None:
+                mask = np.pad(mask, ((pad_h_half, pad_h - pad_h_half), (pad_w_half, pad_w - pad_w_half)),'constant')
 
         w, h = img_list[0].size
         if self.crop_type == 'rand':
@@ -379,17 +376,19 @@ class Crop(object):
             h_off = (h - self.crop_h) // 2
             w_off = (w - self.crop_w) // 2
 
-        # Image padding
+        # Image cropping
         img_list = [
             img.crop((w_off, h_off, w_off + self.crop_w, h_off + self.crop_h))
             for img in img_list
         ]
-        # Label padding
+        # Label cropping
         label_list = [
             label[h_off:h_off + self.crop_h, w_off:w_off + self.crop_w, :]
             for label in label_list
         ]
-        return img_list, label_list
+        # Mask padding
+        mask = mask[h_off:h_off + self.crop_h, w_off:w_off + self.crop_w]
+        return img_list, label_list, mask
 
 
 class RandomHorizontalFlip(object):
@@ -491,7 +490,10 @@ class Compose(object):
         self.transformers = transformers
 
     def __call__(self, *args):
+
         for t in self.transformers:
+            if len(args) < 3 or (not isinstance(args[2],np.ndarray)):
+                print('not enough args')
             args = t(*args)
 
         return args

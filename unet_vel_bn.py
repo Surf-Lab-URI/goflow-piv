@@ -53,7 +53,7 @@ class UNet(nn.Module):
         self.bilinear = bilinear
         self.inpNorm = inpNorm
         if inpNorm:
-            self.bn = nn.BatchNorm2d(n_channels)
+            self.bn = nn.BatchNorm2d(n_channels) #normalizes input data
         #self.inc = DoubleConvTime(n_channels, Nbase, n_emb = n_emb)
         self.inc = (DoubleConv(n_channels, Nbase, stride = 1))
         self.down1 = (Down(Nbase, Nbase*2))
