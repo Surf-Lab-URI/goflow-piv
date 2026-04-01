@@ -174,7 +174,14 @@ def gradient_loss(
     vort2, div2, strain2 = compute_derived_fields(ux2, uy2, vx2, vy2)
     
     # Apply mask (add batch/channel dimensions)
-    mask_bc = mask[None, :, :]
+    if len(mask.shape) == 2 and mask.shape[-2:] == vort1.shape[-2:]:
+        mask_bc = mask[None, :, :]
+    elif len(mask.shape) == 3 and mask.shape[-2:] == vort1.shape[-2:] and mask.shape[0] == vort1.shape[0]:
+        mask_bc = mask[:,None,:,:]
+    elif len(mask.shape) == 4 and mask.shape == vort1.shape:
+        mask_bc = mask
+    else:
+        raise IndexError(f'mask of shape {mask.shape} for gradient_loss is the wrong shape')
     
     loss = (weights[0] * criterion(vort1 * mask_bc, vort2 * mask_bc) +
             weights[1] * criterion(div1 * mask_bc, div2 * mask_bc) +

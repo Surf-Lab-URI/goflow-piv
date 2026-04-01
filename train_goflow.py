@@ -141,8 +141,8 @@ def train_epoch(
     # targets (y), and input-specific masks (m).
     for ib, (x, y, m) in enumerate(tqdm(train_loader, desc='Training')):
         x, y, m = x.to(kernel_x.device), y.to(kernel_x.device), m.to(kernel_x.device)
-        ms = torch.transpose(torch.stack((m, m), dim = 0),0,1)
-
+        ms = torch.transpose(torch.stack((m, m), dim = 0),0,1).to(torch.float)
+        m = m.to(torch.float)
         y_pred = model(x)
         
         # Pointwise L1 loss with boundary masking
@@ -153,8 +153,8 @@ def train_epoch(
         
         # Auxiliary loss (gradient or spectral)
         if use_grad_loss:
-            loss_aux = gradient_loss(y_pred.squeeze()*ms.squeeze(), y.squeeze()*ms.squeeze(), criterion, 
-                                     mask, kernel_x, kernel_y)
+            loss_aux = gradient_loss(y_pred.squeeze(), y.squeeze(), criterion, 
+                                     mask[None,:,:]*m, kernel_x, kernel_y)
         else:
             loss_aux = spectral_loss(y_pred*ms, y*ms, tukey_window)
         
@@ -541,9 +541,13 @@ def write_test_results(
 
     plotcount = 0
     num_tests_recorded = 5
-    for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):      
+    for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):
+        umin = np.min(targets[i,0,:,:])
+        umax = np.max(targets[i,0,:,:])
+        vmin = np.min(targets[i,1,:,:])
+        vmax = np.max(targets[i,1,:,:])
         plt.figure()
-        im = plt.imshow(outputs[i,0,:,:])
+        im = plt.imshow(outputs[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
         cbar.set_label('u (m/s)', rotation=270, labelpad=15)
         plt.title('Inference')
@@ -551,7 +555,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(targets[i,0,:,:])
+        im = plt.imshow(targets[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
         cbar.set_label('u (m/s)', rotation=270, labelpad=15)
         plt.title('Target')
@@ -559,7 +563,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(outputs[i,1,:,:])
+        im = plt.imshow(outputs[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
         cbar.set_label('v (m/s)', rotation=270, labelpad=15)
         plt.title('Inference')
@@ -567,7 +571,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(targets[i,1,:,:])
+        im = plt.imshow(targets[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
         cbar.set_label('v (m/s)', rotation=270, labelpad=15)
         plt.title('Target')
@@ -808,6 +812,17 @@ def main():
     
     # Training criterion
     criterion = nn.L1Loss()
+
+    # # Write untrained baseline
+    # kernel_x = dx_kernel(args.pm).to(device)
+    # kernel_y = dy_kernel(args.pn).to(device)
+    # if args.write_log:
+    #     output_prefix = args.output_subdir
+    # else:
+    #     output_prefix = os.path.join(args.output_subdir, f"test_{model_str}_{args.c_spec}cspec")
+    # write_test_results(
+    #     -1, deepcopy(model), test_loader, kernel_x, kernel_y, output_prefix
+    # )
     
     # Train
     best_model, r2_history, mean_history = train_model(
