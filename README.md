@@ -1,5 +1,5 @@
 # Andy's Intallation Process for Expanse
-Log in to a gpu node on Expanse and run the following commands. If you don't have conda, install miniconda first using [these]([url](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-terminal-installer)) instructions. Then set up a conda environment to work in:
+Log in to a gpu node on Expanse and run the following commands. If you don't have conda, install miniconda first using [these](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-terminal-installer) instructions. Then set up a conda environment to work in:
 
 ```bash
 conda create -n goflow-piv python=3.14
