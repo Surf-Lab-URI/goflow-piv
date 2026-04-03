@@ -36,9 +36,11 @@ Then install the python libraries required:
 - tqdm
 - psutil
 - opencv-python
+- pandas
+- matplotlib
 
 ```bash
-pip install torch numpy scipy scikit-learn netCDF4 tqdm torchvision psutil opencv-python
+pip install torch numpy scipy scikit-learn netCDF4 tqdm torchvision psutil opencv-python pandas matplotlib
 ```
 
 
