@@ -143,6 +143,7 @@ def train_epoch(
         x, y, m = x.to(kernel_x.device), y.to(kernel_x.device), m.to(kernel_x.device)
         ms = torch.transpose(torch.stack((m, m), dim = 0),0,1).to(torch.float)
         m = m.to(torch.float)
+        # im, rm, cm = torch.where(mask[None,:,:]*m > 0)
         y_pred = model(x)
         
         # Pointwise L1 loss with boundary masking
@@ -195,14 +196,16 @@ def evaluate_model(
     with torch.no_grad():
         for x, y, m in tqdm(test_loader, desc='Evaluating'):
             x, y, m = x.to(kernel_x.device), y.to(kernel_x.device), m.to(kernel_x.device)
-            ms = torch.transpose(torch.stack((m, m), dim = 0),0,1)
+            ms = torch.transpose(torch.stack((m, m), dim = 0),0,1).to(torch.float)
+            m = m.to(torch.float)
             y_pred = model(x)
-
+            mask_cpu = mask.to("cpu").numpy()
 
             for i in range(0,3):
                 y_cpu = y.to("cpu").numpy()[i,:,:,:]
                 x_cpu = x.to("cpu").numpy()[i,:,:,:]
                 y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
+                m_cpu = m.to("cpu").numpy()[i,:,:]
                 parent_dir = Path(__file__).resolve().parent
                 dir = parent_dir / 'debugplots'
                 dir.mkdir(exist_ok=True)
@@ -248,6 +251,11 @@ def evaluate_model(
                 plt.imshow(x_cpu[0,:,:], cmap='gray')
                 plt.savefig(dir / f"{plotcount}im0.png")
                 plt.close()
+
+                plt.figure()
+                plt.imshow(mask_cpu*m_cpu, cmap='gray')
+                plt.savefig( dir / f"{plotcount}mask.png")
+                plt.close()
                 plotcount += 1
 
 
@@ -255,7 +263,7 @@ def evaluate_model(
             spec_loss = spectral_loss(y_pred*ms, y*ms, tukey_window)
             
             # R² on gradient fields (vorticity + strain)
-            r2 = compute_gradient_r2(y*ms, y_pred*ms, kernel_x, kernel_y, mask)
+            r2 = compute_gradient_r2(y, y_pred, kernel_x, kernel_y, mask[None,:,:]*m)
 
             # Calculate mean error in the mean
             d = y_pred*ms-y*ms
@@ -314,7 +322,13 @@ def train_model(
         if mask is None:
             sample_x, sample_y, m = next(iter(train_loader))
             shape = sample_y.shape[-2:]
-            mask = create_boundary_mask(shape).to(device)
+            bw = 0
+            if config.rand_trans:
+                if isinstance(config.rand_trans, list):
+                    bw = max(config.rand_trans)
+                else:
+                    bw = config.rand_trans
+            mask = create_boundary_mask(shape,boundary_width=bw+2).to(device)
             tukey_window = create_tukey_window(shape).to(device)
         
         # Train one epoch
@@ -389,7 +403,7 @@ def train_model(
             else:
                 output_prefix = os.path.join(config.output_subdir, f"test_{model_str}_{config.c_spec}cspec")
             write_test_results(
-                epoch, best_model, test_loader, kernel_x, kernel_y, output_prefix
+                epoch, best_model, test_loader, kernel_x, kernel_y, output_prefix, mask
             )
 
         config.logdf.loc[config.exp_idx,'epochs'] = epoch + 1
@@ -495,7 +509,8 @@ def write_test_results(
     test_loader: DataLoader,
     kernel_x: torch.Tensor,
     kernel_y: torch.Tensor,
-    output_prefix: str
+    output_prefix: str,
+    mask: torch.Tensor
 ):
     """Write test set predictions and gradient fields to NetCDF."""
     model.eval()
@@ -526,7 +541,7 @@ def write_test_results(
             inputs_list.append(x.cpu().numpy())
             outputs_list.append(y_pred.cpu().numpy())
             targets_list.append(y_true.cpu().numpy())
-            masks_list.append(m.cpu().numpy())
+            masks_list.append((m*mask[None,:,:]).cpu().numpy())
             true_grads_list.append(torch.stack((vort_true, div_true, strain_true), dim=1).cpu().numpy())
             pred_grads_list.append(torch.stack((vort_pred, div_pred, strain_pred), dim=1).cpu().numpy())
         
@@ -542,10 +557,15 @@ def write_test_results(
     plotcount = 0
     num_tests_recorded = 5
     for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):
+        k = 0.3
         umin = np.min(targets[i,0,:,:])
+        umin = umin - abs(umin)*k
         umax = np.max(targets[i,0,:,:])
+        umax = umax + abs(umax)*k
         vmin = np.min(targets[i,1,:,:])
+        vmin  = vmin - abs(vmin)*k
         vmax = np.max(targets[i,1,:,:])
+        vmax = vmax + abs(vmax)*k
         plt.figure()
         im = plt.imshow(outputs[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
@@ -586,6 +606,11 @@ def write_test_results(
         plt.figure()
         plt.imshow(inputs[i,0,:,:], cmap='gray')
         plt.savefig(os.path.join(output_prefix, f"{plotcount}im0.png"))
+        plt.close()
+
+        plt.figure()
+        plt.imshow(masks[i,:,:], cmap='gray')
+        plt.savefig(os.path.join(output_prefix, f"{plotcount}mask.png"))
         plt.close()
         plotcount += 1
     

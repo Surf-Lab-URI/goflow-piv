@@ -174,7 +174,9 @@ def gradient_loss(
     vort2, div2, strain2 = compute_derived_fields(ux2, uy2, vx2, vy2)
     
     # Apply mask (add batch/channel dimensions)
-    if len(mask.shape) == 2 and mask.shape[-2:] == vort1.shape[-2:]:
+    if mask is None:
+        mask_bc = torch.ones(vort1.shape)
+    elif len(mask.shape) == 2 and mask.shape[-2:] == vort1.shape[-2:]:
         mask_bc = mask[None, :, :]
     elif len(mask.shape) == 3 and mask.shape[-2:] == vort1.shape[-2:] and mask.shape[0] == vort1.shape[0]:
         mask_bc = mask[:,None,:,:]
@@ -478,8 +480,18 @@ def compute_gradient_r2(
     vort_true, _, strain_true = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
     vort_pred, _, strain_pred = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
     
+
+    if len(mask.shape) == 2 and mask.shape[-2:] == vort_true.shape[-2:]:
+        mask_bc = mask[None, :, :]
+    elif len(mask.shape) == 3 and mask.shape[-2:] == vort_true.shape[-2:] and mask.shape[0] == vort_true.shape[0]:
+        mask_bc = mask[:,None,:,:]
+    elif len(mask.shape) == 4 and mask.shape == vort_true.shape:
+        mask_bc = mask
+    else:
+        raise IndexError(f'mask of shape {mask.shape} for gradient_loss is the wrong shape')
+
     # Compute R² for vorticity and strain
-    r2_vort = R2(to_numpy(vort_true * mask), to_numpy(vort_pred * mask))
-    r2_strain = R2(to_numpy(strain_true * mask), to_numpy(strain_pred * mask))
+    r2_vort = R2(to_numpy(vort_true * mask_bc), to_numpy(vort_pred * mask_bc))
+    r2_strain = R2(to_numpy(strain_true * mask_bc), to_numpy(strain_pred * mask_bc))
     
     return (r2_vort + r2_strain) / 2.0
