@@ -1,0 +1,6 @@
+*.out
+debugplots/
+out/
+__pycache__
+*.pth
+.vscode/
