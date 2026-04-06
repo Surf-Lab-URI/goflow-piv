@@ -242,7 +242,7 @@ def get_transform(crop_size=(256, 256), rand_trans = 0):
         # f_transforms.RandomScale([0.95, 1.45]),
         # f_transforms.RandomHorizontalFlip(),
         # f_transforms.RandomVerticalFlip(),
-        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        f_transforms.Crop(crop_size, crop_type='center',padding=0),
         # f_transforms.ModToTensor(),
         # f_transforms.RandomPhotometric(
         #     min_noise_stddev=0.0,
@@ -261,7 +261,7 @@ def get_transform(crop_size=(256, 256), rand_trans = 0):
         f_transforms.RandomTranslate(rand_trans),
         # f_transforms.RandomScale([0.95, 1.45]),
 
-        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        f_transforms.Crop(crop_size, crop_type='center',padding=0),
         # f_transforms.ModToTensor(),
     ])
     

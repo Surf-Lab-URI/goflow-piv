@@ -95,7 +95,7 @@ def parse_args():
 
     parser.add_argument("--subsets", nargs="+", default=[], help="Subdirectories to use")
     parser.add_argument("--ext", type=str, default="tif", help="Image extension")
-    parser.add_argument("--crop-size", type=int, nargs=2, default=[256, 256])
+    parser.add_argument("--crop_size", type=int, nargs=2, default=[256, 256])
     parser.add_argument("--rand_trans", nargs='+', type=int, default=0)
 
     
@@ -663,6 +663,7 @@ def main():
         log_dict = {
             'exp_idx': None,
             'model': args.model,
+            'crop_size': str(args.crop_size),
             'lr': args.lr,
             'batch_size': args.batch_size,
             'c_spec': args.c_spec,
