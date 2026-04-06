@@ -200,63 +200,64 @@ def evaluate_model(
             m = m.to(torch.float)
             y_pred = model(x)
             mask_cpu = mask.to("cpu").numpy()
+            
+            if count % 5 == 0:
+                for i in range(0,1):
+                    y_cpu = y.to("cpu").numpy()[i,:,:,:]
+                    x_cpu = x.to("cpu").numpy()[i,:,:,:]
+                    y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
+                    m_cpu = m.to("cpu").numpy()[i,:,:]
+                    parent_dir = Path(__file__).resolve().parent
+                    dir = parent_dir / 'debugplots'
+                    dir.mkdir(exist_ok=True)
+                    
+                    plt.figure()
+                    im = plt.imshow(y_pred_cpu[0,:,:])
+                    cbar = plt.colorbar(im)
+                    cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+                    plt.title('Inference')
+                    plt.savefig(dir / f"{plotcount}upred.png")
+                    plt.close()
 
-            for i in range(0,3):
-                y_cpu = y.to("cpu").numpy()[i,:,:,:]
-                x_cpu = x.to("cpu").numpy()[i,:,:,:]
-                y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
-                m_cpu = m.to("cpu").numpy()[i,:,:]
-                parent_dir = Path(__file__).resolve().parent
-                dir = parent_dir / 'debugplots'
-                dir.mkdir(exist_ok=True)
-                
-                plt.figure()
-                im = plt.imshow(y_pred_cpu[0,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
-                plt.title('Inference')
-                plt.savefig(dir / f"{plotcount}upred.png")
-                plt.close()
+                    plt.figure()
+                    im = plt.imshow(y_cpu[0,:,:])
+                    cbar = plt.colorbar(im)
+                    cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+                    plt.title('Target')
+                    plt.savefig(dir / f"{plotcount}utarget.png")
+                    plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_cpu[0,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
-                plt.title('Target')
-                plt.savefig(dir / f"{plotcount}utarget.png")
-                plt.close()
+                    plt.figure()
+                    im = plt.imshow(y_pred_cpu[1,:,:])
+                    cbar = plt.colorbar(im)
+                    cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+                    plt.title('Inference')
+                    plt.savefig(dir / f"{plotcount}vpred.png")
+                    plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_pred_cpu[1,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
-                plt.title('Inference')
-                plt.savefig(dir / f"{plotcount}vpred.png")
-                plt.close()
+                    plt.figure()
+                    im = plt.imshow(y_cpu[1,:,:])
+                    cbar = plt.colorbar(im)
+                    cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+                    plt.title('Target')
+                    plt.savefig(dir / f"{plotcount}vtarget.png")
+                    plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_cpu[1,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
-                plt.title('Target')
-                plt.savefig(dir / f"{plotcount}vtarget.png")
-                plt.close()
+                    plt.figure()
+                    plt.imshow(x_cpu[1,:,:], cmap='gray')
+                    plt.savefig(dir / f"{plotcount}im1.png")
+                    plt.close()
 
-                plt.figure()
-                plt.imshow(x_cpu[1,:,:], cmap='gray')
-                plt.savefig(dir / f"{plotcount}im1.png")
-                plt.close()
+                    plt.figure()
+                    plt.imshow(x_cpu[0,:,:], cmap='gray')
+                    plt.savefig(dir / f"{plotcount}im0.png")
+                    plt.close()
 
-                plt.figure()
-                plt.imshow(x_cpu[0,:,:], cmap='gray')
-                plt.savefig(dir / f"{plotcount}im0.png")
-                plt.close()
-
-                plt.figure()
-                plt.imshow(mask_cpu*m_cpu, cmap='gray')
-                plt.savefig( dir / f"{plotcount}mask.png")
-                plt.close()
-                plotcount += 1
+                    plt.figure()
+                    plt.imshow(mask_cpu*m_cpu, cmap='gray')
+                    plt.savefig( dir / f"{plotcount}mask.png")
+                    plt.close()
+                    plotcount += 1
 
 
             # Spectral loss
@@ -372,12 +373,13 @@ def train_model(
             #                        config.valid_inds, config.goes_file)
         
         # Track best r2, mean, spec_loss
-        if r2 > best_r2:
-            best_r2 = r2
-        if spec_loss < best_spec:
-            best_spec = spec_loss
-        if mean_diff < best_mean_diff:
-            best_mean_diff = mean_diff
+        if epoch > 1:
+            if r2 > best_r2:
+                best_r2 = r2
+            if spec_loss < best_spec:
+                best_spec = spec_loss
+            if mean_diff < best_mean_diff:
+                best_mean_diff = mean_diff
 
 
         # Track best model
@@ -615,32 +617,32 @@ def write_test_results(
         plotcount += 1
     
     # Write NetCDF
-    nc_filename = os.path.join(output_prefix, f'results.nc')
+    # nc_filename = os.path.join(output_prefix, f'results.nc')
     
-    Nt, Nimg, Ny, Nx = inputs.shape
-    varlist = ['img_0','img_1','mask','U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
-               'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
+    # Nt, Nimg, Ny, Nx = inputs.shape
+    # varlist = ['img_0','img_1','mask','U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
+    #            'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
     
-    with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
-        nc.variables['img_0'][:] = inputs[:,0,:,:]
-        nc.variables['img_1'][:] = inputs[:,1,:,:]
-        nc.variables['mask'][:] = masks[:,:,:]
-        nc.variables['U_inp'][:] = targets[:, 0, :, :]
-        nc.variables['V_inp'][:] = targets[:, 1, :, :]
-        nc.variables['U_out'][:] = outputs[:, 0, :, :]
-        nc.variables['V_out'][:] = outputs[:, 1, :, :]
-        nc.variables['vort_inp'][:] = true_grads[:, 0, :, :]
-        nc.variables['div_inp'][:] = true_grads[:, 1, :, :]
-        nc.variables['strain_inp'][:] = true_grads[:, 2, :, :]
-        nc.variables['vort_out'][:] = pred_grads[:, 0, :, :]
-        nc.variables['div_out'][:] = pred_grads[:, 1, :, :]
-        nc.variables['strain_out'][:] = pred_grads[:, 2, :, :]
+    # with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
+    #     nc.variables['img_0'][:] = inputs[:,0,:,:]
+    #     nc.variables['img_1'][:] = inputs[:,1,:,:]
+    #     nc.variables['mask'][:] = masks[:,:,:]
+    #     nc.variables['U_inp'][:] = targets[:, 0, :, :]
+    #     nc.variables['V_inp'][:] = targets[:, 1, :, :]
+    #     nc.variables['U_out'][:] = outputs[:, 0, :, :]
+    #     nc.variables['V_out'][:] = outputs[:, 1, :, :]
+    #     nc.variables['vort_inp'][:] = true_grads[:, 0, :, :]
+    #     nc.variables['div_inp'][:] = true_grads[:, 1, :, :]
+    #     nc.variables['strain_inp'][:] = true_grads[:, 2, :, :]
+    #     nc.variables['vort_out'][:] = pred_grads[:, 0, :, :]
+    #     nc.variables['div_out'][:] = pred_grads[:, 1, :, :]
+    #     nc.variables['strain_out'][:] = pred_grads[:, 2, :, :]
         
-        nc.description = f'Test set results for epoch {epoch}'
-        nc.input_field = 'input'
-        nc.output_fields = 'Vorticity, Divergence, Strain (target and predicted)'
+    #     nc.description = f'Test set results for epoch {epoch}'
+    #     nc.input_field = 'input'
+    #     nc.output_fields = 'Vorticity, Divergence, Strain (target and predicted)'
     
-    print(f'Test results written to {nc_filename}')
+    # print(f'Test results written to {nc_filename}')
 
 
 # =============================================================================
@@ -653,7 +655,7 @@ def main():
     args_dict = vars(args)
     args_string = str(args_dict)
 
-    if args.resume_from_file or args.resume_from_idx:
+    if (args.resume_from_file is not None) or (args.resume_from_idx is not None):
         args.resume = True
 
     if args.write_log:
