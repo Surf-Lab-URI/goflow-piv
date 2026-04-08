@@ -3,7 +3,7 @@
 #SBATCH --output="dns_trans_test.%j.%N.out"
 #SBATCH --partition=gpu-shared
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=5
 #SBATCH --gpus=1
 #SBATCH --mem=96000M
 #SBATCH --account=uri107
