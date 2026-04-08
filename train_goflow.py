@@ -95,7 +95,7 @@ def parse_args():
 
     parser.add_argument("--subsets", nargs="+", default=[], help="Subdirectories to use")
     parser.add_argument("--ext", type=str, default="tif", help="Image extension")
-    parser.add_argument("--crop-size", type=int, nargs=2, default=[256, 256])
+    parser.add_argument("--crop_size", type=int, nargs=2, default=[256, 256])
     parser.add_argument("--rand_trans", nargs='+', type=int, default=0)
 
     
@@ -385,7 +385,7 @@ def train_model(
             else:
                 output_prefix = os.path.join(config.output_subdir, f"test_{model_str}_{config.c_spec}cspec")
             write_test_results(
-                epoch, best_model, test_loader, kernel_x, kernel_y, output_prefix
+                epoch, best_model, test_loader, kernel_x, kernel_y, output_prefix, mask
             )
 
         config.logdf.loc[config.exp_idx,'epochs'] = epoch + 1
@@ -491,7 +491,8 @@ def write_test_results(
     test_loader: DataLoader,
     kernel_x: torch.Tensor,
     kernel_y: torch.Tensor,
-    output_prefix: str
+    output_prefix: str,
+    mask: torch.Tensor
 ):
     """Write test set predictions and gradient fields to NetCDF."""
     model.eval()
@@ -500,6 +501,7 @@ def write_test_results(
     inputs_list = []
     outputs_list = []
     targets_list = []
+    masks_list = []
     true_grads_list = []
     pred_grads_list = []
 
@@ -521,6 +523,7 @@ def write_test_results(
             inputs_list.append(x.cpu().numpy())
             outputs_list.append(y_pred.cpu().numpy())
             targets_list.append(y_true.cpu().numpy())
+            masks_list.append((mask[None,:,:]).cpu().numpy())
             true_grads_list.append(torch.stack((vort_true, div_true, strain_true), dim=1).cpu().numpy())
             pred_grads_list.append(torch.stack((vort_pred, div_pred, strain_pred), dim=1).cpu().numpy())
         
@@ -529,14 +532,24 @@ def write_test_results(
     inputs = np.concatenate(inputs_list, axis=0)
     outputs = np.concatenate(outputs_list, axis=0)
     targets = np.concatenate(targets_list, axis=0)
+    masks = np.concatenate(masks_list, axis=0)
     true_grads = np.concatenate(true_grads_list, axis=0)
     pred_grads = np.concatenate(pred_grads_list, axis=0)
 
     plotcount = 0
     num_tests_recorded = 5
-    for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):      
+    for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):
+        k = 0.3
+        umin = np.min(targets[i,0,:,:])
+        umin = umin - abs(umin)*k
+        umax = np.max(targets[i,0,:,:])
+        umax = umax + abs(umax)*k
+        vmin = np.min(targets[i,1,:,:])
+        vmin  = vmin - abs(vmin)*k
+        vmax = np.max(targets[i,1,:,:])
+        vmax = vmax + abs(vmax)*k
         plt.figure()
-        im = plt.imshow(outputs[i,0,:,:])
+        im = plt.imshow(outputs[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
         cbar.set_label('u (m/s)', rotation=270, labelpad=15)
         plt.title('Inference')
@@ -544,7 +557,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(targets[i,0,:,:])
+        im = plt.imshow(targets[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
         cbar.set_label('u (m/s)', rotation=270, labelpad=15)
         plt.title('Target')
@@ -552,7 +565,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(outputs[i,1,:,:])
+        im = plt.imshow(outputs[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
         cbar.set_label('v (m/s)', rotation=270, labelpad=15)
         plt.title('Inference')
@@ -560,7 +573,7 @@ def write_test_results(
         plt.close()
 
         plt.figure()
-        im = plt.imshow(targets[i,1,:,:])
+        im = plt.imshow(targets[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
         cbar.set_label('v (m/s)', rotation=270, labelpad=15)
         plt.title('Target')
@@ -616,7 +629,7 @@ def main():
     args_dict = vars(args)
     args_string = str(args_dict)
 
-    if args.resume_from_file or args.resume_from_idx:
+    if (args.resume_from_file is not None) or (args.resume_from_idx is not None):
         args.resume = True
 
     if args.write_log:
@@ -624,6 +637,7 @@ def main():
         log_dict = {
             'exp_idx': None,
             'model': args.model,
+            'crop_size': str(args.crop_size),
             'lr': args.lr,
             'batch_size': args.batch_size,
             'c_spec': args.c_spec,
@@ -752,14 +766,14 @@ def main():
     plt.savefig(dir / "x_sample_0.png")
     plt.close()
 
-    model = initialize_model(
+    model_prev = initialize_model(
         n_input, n_output,
         model_name=args.model,
         nbase=args.nbase,
         kernel_size=args.kernel_size,
         device=device
     )
-    
+    model = torch.compile(model_prev)
     # Load pretrained weights if using spectral loss or if '--resume' flag is set to true
     model_str = get_model_string(args.model, args.nbase, args.kernel_size, args.use_grad_loss)
     if args.resume: #formerly also triggered by c_spec > 0, but that restricts what you can do a bit.
@@ -800,6 +814,17 @@ def main():
     
     # Training criterion
     criterion = nn.L1Loss()
+
+    # # Write untrained baseline
+    # kernel_x = dx_kernel(args.pm).to(device)
+    # kernel_y = dy_kernel(args.pn).to(device)
+    # if args.write_log:
+    #     output_prefix = args.output_subdir
+    # else:
+    #     output_prefix = os.path.join(args.output_subdir, f"test_{model_str}_{args.c_spec}cspec")
+    # write_test_results(
+    #     -1, deepcopy(model), test_loader, kernel_x, kernel_y, output_prefix
+    # )
     
     # Train
     best_model, r2_history, mean_history = train_model(
