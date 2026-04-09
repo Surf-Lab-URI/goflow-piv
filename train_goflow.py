@@ -142,6 +142,10 @@ def train_epoch(
         x, y = x.to(kernel_x.device), y.to(kernel_x.device)
         
         y_pred = model(x)
+
+        if y_pred.isnan().any():
+            print('y_pred has nans in train_epoch')
+
         
         # Pointwise L1 loss with boundary masking
         loss_l1 = criterion(
@@ -158,6 +162,7 @@ def train_epoch(
         
         # Combined loss
         loss = (1 - c_spec) * loss_l1 + c_spec * loss_aux
+        print(f"loss_l1={loss_l1}, loss_aux={loss_aux}, loss={loss}")
         
         # Store first batch losses for logging
         if ib == 0:
@@ -194,6 +199,9 @@ def evaluate_model(
         for x, y in tqdm(test_loader, desc='Evaluating'):
             x, y = x.to(kernel_x.device), y.to(kernel_x.device)
             y_pred = model(x)
+
+            if y_pred.isnan().any():
+                print('y_pred has nans in evaluate_model')
 
             for i in range(0,3):
                 y_cpu = y.to("cpu").numpy()[i,:,:,:]
