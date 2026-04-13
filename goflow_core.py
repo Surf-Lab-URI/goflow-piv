@@ -18,6 +18,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, ConcatDataset, Dataset, random_split
 from scipy.signal.windows import tukey
 from sklearn.metrics import r2_score as R2
+import gc
+
 
 # Model imports - adjust paths as needed
 from unet_vel_bn import UNet
@@ -52,6 +54,15 @@ def compute_dy(field: torch.Tensor, kernel_y: torch.Tensor) -> torch.Tensor:
     """Compute y-derivative with replicate boundary padding."""
     return F.conv2d(F.pad(field, (0, 0, 1, 1), mode='replicate'), kernel_y)
 
+def setup_device(cuda_idx: int) -> torch.device:
+    """Configure CUDA device and clear memory."""
+    device = torch.device(f'cuda:{cuda_idx}' if torch.cuda.is_available() else 'cpu')
+    if torch.cuda.is_available():
+        torch.cuda.set_device(cuda_idx)
+        torch.cuda.empty_cache()
+    gc.collect()
+    print(f'Device: {device}')
+    return device
 
 def compute_velocity_gradients(
     uv: torch.Tensor, 
@@ -233,7 +244,7 @@ def get_transform(crop_size=(256, 256), rand_trans = 0):
         # f_transforms.RandomScale([0.95, 1.45]),
         # f_transforms.RandomHorizontalFlip(),
         # f_transforms.RandomVerticalFlip(),
-        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        f_transforms.Crop(crop_size, crop_type='center',padding=0),
         # f_transforms.ModToTensor(),
         # f_transforms.RandomPhotometric(
         #     min_noise_stddev=0.0,
@@ -252,7 +263,7 @@ def get_transform(crop_size=(256, 256), rand_trans = 0):
         f_transforms.RandomTranslate(rand_trans),
         # f_transforms.RandomScale([0.95, 1.45]),
 
-        f_transforms.Crop(crop_size, crop_type='rand',padding=0),
+        f_transforms.Crop(crop_size, crop_type='center',padding=0),
         # f_transforms.ModToTensor(),
     ])
     

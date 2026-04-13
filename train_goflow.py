@@ -33,7 +33,7 @@ from goflow_core import (
     gradient_loss, compute_gradient_r2, to_numpy,
     load_datasets, create_dataloaders,
     initialize_model, save_model, load_model,
-    get_model_string, count_parameters, make_splits
+    get_model_string, count_parameters, make_splits, setup_device
 )
 from spectral_loss import spectral_loss
 from utils import cosineSGDR
@@ -88,7 +88,7 @@ def parse_args():
     parser.add_argument('--write_log', action='store_true', help = 'Write a summary of results to a log file in the directory specified by --output_dir')
     
     # Data parameters
-    parser.add_argument('--nframes', type=int, default=3, help='Number of input frames')
+    parser.add_argument('--nframes', type=int, default=2, help='Number of input frames')
     parser.add_argument('--step0', type=int, default=1, help='Time step stride')
     parser.add_argument('--pm', type=float, default=1, help='X grid metric')
     parser.add_argument('--pn', type=float, default=1, help='Y grid metric')
@@ -100,17 +100,6 @@ def parse_args():
 
     
     return parser.parse_args()
-
-
-def setup_device(cuda_idx: int) -> torch.device:
-    """Configure CUDA device and clear memory."""
-    device = torch.device(f'cuda:{cuda_idx}' if torch.cuda.is_available() else 'cpu')
-    if torch.cuda.is_available():
-        torch.cuda.set_device(cuda_idx)
-        torch.cuda.empty_cache()
-    gc.collect()
-    print(f'Device: {device}')
-    return device
 
 
 # =============================================================================
@@ -600,31 +589,31 @@ def write_test_results(
         plotcount += 1
     
     # Write NetCDF
-    nc_filename = os.path.join(output_prefix, f'results.nc')
+    # nc_filename = os.path.join(output_prefix, f'results.nc')
     
-    Nt, Nimg, Ny, Nx = inputs.shape
-    varlist = ['img_0','img_1', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
-               'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
+    # Nt, Nimg, Ny, Nx = inputs.shape
+    # varlist = ['img_0','img_1', 'U_inp', 'V_inp', 'vort_inp', 'div_inp', 'strain_inp',
+    #            'U_out', 'V_out', 'vort_out', 'div_out', 'strain_out']
     
-    with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
-        nc.variables['img_0'][:] = inputs[:,0,:,:]
-        nc.variables['img_1'][:] = inputs[:,1,:,:]
-        nc.variables['U_inp'][:] = targets[:, 0, :, :]
-        nc.variables['V_inp'][:] = targets[:, 1, :, :]
-        nc.variables['U_out'][:] = outputs[:, 0, :, :]
-        nc.variables['V_out'][:] = outputs[:, 1, :, :]
-        nc.variables['vort_inp'][:] = true_grads[:, 0, :, :]
-        nc.variables['div_inp'][:] = true_grads[:, 1, :, :]
-        nc.variables['strain_inp'][:] = true_grads[:, 2, :, :]
-        nc.variables['vort_out'][:] = pred_grads[:, 0, :, :]
-        nc.variables['div_out'][:] = pred_grads[:, 1, :, :]
-        nc.variables['strain_out'][:] = pred_grads[:, 2, :, :]
+    # with ncCreate(nc_filename, Nx, Ny, varlist) as nc:
+    #     nc.variables['img_0'][:] = inputs[:,0,:,:]
+    #     nc.variables['img_1'][:] = inputs[:,1,:,:]
+    #     nc.variables['U_inp'][:] = targets[:, 0, :, :]
+    #     nc.variables['V_inp'][:] = targets[:, 1, :, :]
+    #     nc.variables['U_out'][:] = outputs[:, 0, :, :]
+    #     nc.variables['V_out'][:] = outputs[:, 1, :, :]
+    #     nc.variables['vort_inp'][:] = true_grads[:, 0, :, :]
+    #     nc.variables['div_inp'][:] = true_grads[:, 1, :, :]
+    #     nc.variables['strain_inp'][:] = true_grads[:, 2, :, :]
+    #     nc.variables['vort_out'][:] = pred_grads[:, 0, :, :]
+    #     nc.variables['div_out'][:] = pred_grads[:, 1, :, :]
+    #     nc.variables['strain_out'][:] = pred_grads[:, 2, :, :]
         
-        nc.description = f'Test set results for epoch {epoch}'
-        nc.input_field = 'input'
-        nc.output_fields = 'Vorticity, Divergence, Strain (target and predicted)'
+    #     nc.description = f'Test set results for epoch {epoch}'
+    #     nc.input_field = 'input'
+    #     nc.output_fields = 'Vorticity, Divergence, Strain (target and predicted)'
     
-    print(f'Test results written to {nc_filename}')
+    # print(f'Test results written to {nc_filename}')
 
 
 # =============================================================================

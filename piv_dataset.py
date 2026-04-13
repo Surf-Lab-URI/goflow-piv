@@ -166,7 +166,7 @@ class PIVInference(Dataset):
         self.samples = []
         
         # Get subdirectories to scan
-        if subsets is not None:
+        if (subsets is not None) and (len(subsets) > 0):
             dirs = [root / s for s in subsets]
         else:
             dirs = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith('.')]
@@ -177,12 +177,15 @@ class PIVInference(Dataset):
         
         for subdir in sorted(dirs):
             if not subdir.exists():
+                print(f"Warning: {subdir} does not exist, skipping")
                 continue
             for img1 in sorted(subdir.glob(f'*_img1.{ext}')):
                 name = img1.stem.rsplit('_img1', 1)[0]
                 img2 = subdir / f'{name}_img2.{ext}'
                 if img2.exists():
                     self.samples.append((str(img1), str(img2), name))
+                else:
+                    print(f"Warning: could not find second image for {str(img2)}")
         
         if not self.samples:
             raise ValueError(f"No image pairs found in {root}")
@@ -195,14 +198,14 @@ class PIVInference(Dataset):
     def __getitem__(self, idx):
         img1_path, img2_path, name = self.samples[idx]
         
-        img1 = np.array(Image.open(img1_path).convert('RGB'), dtype=np.float32) / 255.0
-        img2 = np.array(Image.open(img2_path).convert('RGB'), dtype=np.float32) / 255.0
+        img1 = np.array(Image.open(img1_path), dtype=np.float32)#[200:1000,0:1000]
+        img2 = np.array(Image.open(img2_path), dtype=np.float32)#[200:1000,0:1000]
         
         # Keep original size - adaptive resizing handled in inference function
-        img1 = torch.from_numpy(img1.transpose(2, 0, 1))
-        img2 = torch.from_numpy(img2.transpose(2, 0, 1))
+        imgs = np.stack([img1,img2], axis=0)
+        imgs = torch.from_numpy(imgs)
         
-        return img1, img2, name
+        return tuple([imgs, name])
 
 
 # === Usage ===
