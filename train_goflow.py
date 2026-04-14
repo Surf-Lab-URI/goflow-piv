@@ -775,7 +775,7 @@ def main():
     model_str = get_model_string(args.model, args.nbase, args.kernel_size, args.use_grad_loss)
     if args.resume: #formerly also triggered by c_spec > 0, but that restricts what you can do a bit.
         if args.write_log and args.resume: #if write_log option is set, find the previous model listed in the log file.
-            if args.resume_from_idx:
+            if args.resume_from_idx is not None:
                 stage0_file = f'{logdf.loc[args.resume_from_idx,'best_model_file']}'
             elif args.resume_from_file:
                 stage0_file = args.resume_from_file
