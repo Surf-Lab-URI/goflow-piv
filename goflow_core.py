@@ -188,8 +188,8 @@ def gradient_loss(
     mask_bc = mask[None, :, :]
     
     loss = (weights[0] * criterion(vort1 * mask_bc, vort2 * mask_bc) +
-            weights[1] * criterion(div1 * mask_bc, div2 * mask_bc) +
-            weights[2] * criterion(strain1 * mask_bc, strain2 * mask_bc))
+            weights[1] * criterion(div1 * mask_bc, div2 * mask_bc))
+            # weights[2] * criterion(strain1 * mask_bc, strain2 * mask_bc))
     
     return loss
 
