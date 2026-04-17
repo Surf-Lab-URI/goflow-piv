@@ -1,6 +1,8 @@
 *.out
 debugplots/
 out/
+in/
+sh/
 __pycache__
 *.pth
 .vscode/
