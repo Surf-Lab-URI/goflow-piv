@@ -68,6 +68,7 @@ def parse_args():
                         help='Number of epochs (default: 100 for c_spec=0, 50 otherwise)')
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate')
     parser.add_argument('--batch_size', type=int, default=None, help='Training batch size')
+    parser.add_argument('--weight_decay', type=float, default=1e-5, help='weight decay')
     parser.add_argument('--tcycle', type=int, default=5, help='Cosine annealing cycle length')
     parser.add_argument('--resume', action='store_true', help='Set to resume training from previous best model' )
     parser.add_argument('--resume_from_idx', type=int, default = None, 
@@ -151,7 +152,9 @@ def train_epoch(
         
         # Combined loss
         loss = (1 - c_spec) * loss_l1 + c_spec * loss_aux
-        print(f"loss_l1={loss_l1}, loss_aux={loss_aux}, loss={loss}")
+
+        if loss.isnan():
+            print(f"loss_l1={loss_l1}, loss_aux={loss_aux}, loss={loss}")
         
         # Store first batch losses for logging
         if ib == 0:
@@ -192,56 +195,56 @@ def evaluate_model(
             if y_pred.isnan().any():
                 print('y_pred has nans in evaluate_model')
 
-            for i in range(0,3):
-                y_cpu = y.to("cpu").numpy()[i,:,:,:]
-                x_cpu = x.to("cpu").numpy()[i,:,:,:]
-                y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
-                parent_dir = Path(__file__).resolve().parent
-                dir = parent_dir / 'debugplots'
-                dir.mkdir(exist_ok=True)
+            # for i in range(0,3):
+            #     y_cpu = y.to("cpu").numpy()[i,:,:,:]
+            #     x_cpu = x.to("cpu").numpy()[i,:,:,:]
+            #     y_pred_cpu = y_pred.to("cpu").numpy()[i,:,:,:]
+            #     parent_dir = Path(__file__).resolve().parent
+            #     dir = parent_dir / 'debugplots'
+            #     dir.mkdir(exist_ok=True)
                 
-                plt.figure()
-                im = plt.imshow(y_pred_cpu[0,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
-                plt.title('Inference')
-                plt.savefig(dir / f"{plotcount}upred.png")
-                plt.close()
+            #     plt.figure()
+            #     im = plt.imshow(y_pred_cpu[0,:,:])
+            #     cbar = plt.colorbar(im)
+            #     cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+            #     plt.title('Inference')
+            #     plt.savefig(dir / f"{plotcount}upred.png")
+            #     plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_cpu[0,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('u (m/s)', rotation=270, labelpad=15)
-                plt.title('Target')
-                plt.savefig(dir / f"{plotcount}utarget.png")
-                plt.close()
+            #     plt.figure()
+            #     im = plt.imshow(y_cpu[0,:,:])
+            #     cbar = plt.colorbar(im)
+            #     cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+            #     plt.title('Target')
+            #     plt.savefig(dir / f"{plotcount}utarget.png")
+            #     plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_pred_cpu[1,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
-                plt.title('Inference')
-                plt.savefig(dir / f"{plotcount}vpred.png")
-                plt.close()
+            #     plt.figure()
+            #     im = plt.imshow(y_pred_cpu[1,:,:])
+            #     cbar = plt.colorbar(im)
+            #     cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+            #     plt.title('Inference')
+            #     plt.savefig(dir / f"{plotcount}vpred.png")
+            #     plt.close()
 
-                plt.figure()
-                im = plt.imshow(y_cpu[1,:,:])
-                cbar = plt.colorbar(im)
-                cbar.set_label('v (m/s)', rotation=270, labelpad=15)
-                plt.title('Target')
-                plt.savefig(dir / f"{plotcount}vtarget.png")
-                plt.close()
+            #     plt.figure()
+            #     im = plt.imshow(y_cpu[1,:,:])
+            #     cbar = plt.colorbar(im)
+            #     cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+            #     plt.title('Target')
+            #     plt.savefig(dir / f"{plotcount}vtarget.png")
+            #     plt.close()
 
-                plt.figure()
-                plt.imshow(x_cpu[1,:,:], cmap='gray')
-                plt.savefig(dir / f"{plotcount}im1.png")
-                plt.close()
+            #     plt.figure()
+            #     plt.imshow(x_cpu[1,:,:], cmap='gray')
+            #     plt.savefig(dir / f"{plotcount}im1.png")
+            #     plt.close()
 
-                plt.figure()
-                plt.imshow(x_cpu[0,:,:], cmap='gray')
-                plt.savefig(dir / f"{plotcount}im0.png")
-                plt.close()
-                plotcount += 1
+            #     plt.figure()
+            #     plt.imshow(x_cpu[0,:,:], cmap='gray')
+            #     plt.savefig(dir / f"{plotcount}im0.png")
+            #     plt.close()
+            #     plotcount += 1
 
 
             # Spectral loss
@@ -637,6 +640,7 @@ def main():
             'crop_size': str(args.crop_size),
             'lr': args.lr,
             'batch_size': args.batch_size,
+            'weight_decay': args.weight_decay,
             'c_spec': args.c_spec,
             'use_grad': args.use_grad_loss,
             'epochs': 0,
@@ -711,7 +715,7 @@ def main():
         else:
             batch_sizes = {'train': 64, 'test': 200, 'valid': 50}
     else:
-        batch_sizes = {'train': args.batch_size, 'test': 200, 'valid': 50}
+        batch_sizes = {'train': args.batch_size, 'test': args.batch_size, 'valid': 50}
     
     if len(args.rand_trans) < 2:
         args.rand_trans = args.rand_trans[0]
@@ -806,7 +810,7 @@ def main():
         lr=args.lr,
         betas=(0.9, 0.999),
         eps=1e-8,
-        weight_decay=1e-5
+        weight_decay=args.weight_decay
     )
     
     # Training criterion
