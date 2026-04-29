@@ -98,14 +98,14 @@ def compute_derived_fields(
     Compute vorticity, divergence, and strain magnitude from velocity gradients.
     
     Returns:
-        Tuple of (vorticity, divergence, strain_magnitude)
+        Tuple of (vorticity, divergence, strain_magnitude, first strain component, second strain component)
     """
     vorticity = vx - uy
     divergence = ux + vy
-    s1 = ux - vy  # Normal strain
-    s2 = vx + uy  # Shear strain
-    strain = torch.sqrt(s1**2 + s2**2)
-    return vorticity, divergence, strain
+    sn = ux - vy  # Normal strain
+    ss = vx + uy  # Shear strain
+    strain = torch.sqrt(sn**2 + ss**2) #+ 1e-1)
+    return vorticity, divergence, strain, sn, ss
 
 
 # =============================================================================
@@ -181,15 +181,16 @@ def gradient_loss(
     ux2, uy2, vx2, vy2 = compute_velocity_gradients(target, kernel_x, kernel_y)
     
     # Compute derived fields
-    vort1, div1, strain1 = compute_derived_fields(ux1, uy1, vx1, vy1)
-    vort2, div2, strain2 = compute_derived_fields(ux2, uy2, vx2, vy2)
+    vort1, div1, strain1, sn1, ss1 = compute_derived_fields(ux1, uy1, vx1, vy1)
+    vort2, div2, strain2, sn2, ss2 = compute_derived_fields(ux2, uy2, vx2, vy2)
     
     # Apply mask (add batch/channel dimensions)
     mask_bc = mask[None, :, :]
     
     loss = (weights[0] * criterion(vort1 * mask_bc, vort2 * mask_bc) +
-            weights[1] * criterion(div1 * mask_bc, div2 * mask_bc))
-            # weights[2] * criterion(strain1 * mask_bc, strain2 * mask_bc))
+            weights[1] * criterion(div1 * mask_bc, div2 * mask_bc) +
+            0.5 * weights[2] * criterion(sn1 * mask_bc, sn2 * mask_bc) + 
+            0.5 * weights[2] * criterion(ss1 * mask_bc, ss2 * mask_bc))
     
     return loss
 
@@ -479,8 +480,8 @@ def compute_gradient_r2(
     ux_pred, uy_pred, vx_pred, vy_pred = compute_velocity_gradients(y_pred, kernel_x, kernel_y)
     
     # Compute derived fields
-    vort_true, _, strain_true = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
-    vort_pred, _, strain_pred = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
+    vort_true, _, strain_true, _, _ = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
+    vort_pred, _, strain_pred, _, _ = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
     
     # Compute R² for vorticity and strain
     r2_vort = R2(to_numpy(vort_true * mask), to_numpy(vort_pred * mask))

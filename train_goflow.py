@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 
-
 # Local imports
 from goflow_core import (
     dx_kernel, dy_kernel,
@@ -517,8 +516,8 @@ def write_test_results(
             ux_true, uy_true, vx_true, vy_true = compute_velocity_gradients(y_true, kernel_x, kernel_y)
             ux_pred, uy_pred, vx_pred, vy_pred = compute_velocity_gradients(y_pred, kernel_x, kernel_y)
             
-            vort_true, div_true, strain_true = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
-            vort_pred, div_pred, strain_pred = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
+            vort_true, div_true, strain_true, _, _ = compute_derived_fields(ux_true, uy_true, vx_true, vy_true)
+            vort_pred, div_pred, strain_pred, _, _ = compute_derived_fields(ux_pred, uy_pred, vx_pred, vy_pred)
             
             inputs_list.append(x.cpu().numpy())
             outputs_list.append(y_pred.cpu().numpy())
@@ -537,7 +536,8 @@ def write_test_results(
     pred_grads = np.concatenate(pred_grads_list, axis=0)
 
     plotcount = 0
-    num_tests_recorded = 5
+    num_tests_recorded = 20
+    plotIs = np.random.randint(0,inputs.shape[0], size=num_tests_recorded)
     for i in range(0,inputs.shape[0],round(inputs.shape[0]/num_tests_recorded)):
         k = 0.3
         umin = np.min(targets[i,0,:,:])
@@ -551,7 +551,7 @@ def write_test_results(
         plt.figure()
         im = plt.imshow(outputs[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
-        cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+        cbar.set_label('u (px/pair)', rotation=270, labelpad=15)
         plt.title('Inference')
         plt.savefig(os.path.join(output_prefix, f"{plotcount}upred.png"))
         plt.close()
@@ -559,7 +559,7 @@ def write_test_results(
         plt.figure()
         im = plt.imshow(targets[i,0,:,:], vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
-        cbar.set_label('u (m/s)', rotation=270, labelpad=15)
+        cbar.set_label('u (px/pair)', rotation=270, labelpad=15)
         plt.title('Target')
         plt.savefig(os.path.join(output_prefix, f"{plotcount}utarget.png"))
         plt.close()
@@ -567,7 +567,7 @@ def write_test_results(
         plt.figure()
         im = plt.imshow(outputs[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
-        cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+        cbar.set_label('v (px/pair)', rotation=270, labelpad=15)
         plt.title('Inference')
         plt.savefig(os.path.join(output_prefix, f"{plotcount}vpred.png"))
         plt.close()
@@ -575,7 +575,7 @@ def write_test_results(
         plt.figure()
         im = plt.imshow(targets[i,1,:,:], vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
-        cbar.set_label('v (m/s)', rotation=270, labelpad=15)
+        cbar.set_label('v (px/pair)', rotation=270, labelpad=15)
         plt.title('Target')
         plt.savefig(os.path.join(output_prefix, f"{plotcount}vtarget.png"))
         plt.close()
@@ -637,6 +637,7 @@ def main():
         log_dict = {
             'exp_idx': None,
             'model': args.model,
+            'nbase': args.nbase,
             'crop_size': str(args.crop_size),
             'lr': args.lr,
             'batch_size': args.batch_size,
