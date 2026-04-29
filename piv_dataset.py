@@ -42,8 +42,14 @@ class TransformSubset(Dataset):
         else:
             img1 = Image.open(img1_path)
             img2 = Image.open(img2_path)
-            flow = read_flow(flow_path)
+            if Path(flow_path).suffix == ".flo":
+                flow = read_flow(flow_path)
+            else:
+                flow = np.load(flow_path)
+                flow = flow[0,:,:,:]
+                flow = np.transpose(flow, (1,2,0))
         
+        #self.transform expects the flow array to have dimensions (w, h, 2), not (2, w, h). The dimension of length 2 is for u and v.
         imglist, flow = self.transform([img1, img2], [flow])
         flow = flow[0]
         imgs = np.stack(imglist, axis=0, dtype = np.float32)
@@ -120,6 +126,17 @@ class PIVDataset(Dataset):
                     
                     if img1.exists() and img2.exists():
                         samples.append((str(img1), str(img2), str(flo_path)))
+
+            elif len(list(subdir.glob('*_flow.npy'))) > 0:
+                for flo_path in sorted(subdir.glob('*_flow.npy')):
+                    # DNS_turbulence_00500_flow.flo -> DNS_turbulence_00500
+                    name = flo_path.stem.rsplit('_flow', 1)[0]
+                    img1 = subdir / f'{name}_a.{ext}'
+                    img2 = subdir / f'{name}_b.{ext}'
+                    
+                    if img1.exists() and img2.exists():
+                        samples.append((str(img1), str(img2), str(flo_path)))
+
             # else, if flow files aren't provide:
             else:
                 for im_path in sorted(subdir.glob(f'*.{ext}')):
@@ -197,9 +214,9 @@ class PIVInference(Dataset):
     
     def __getitem__(self, idx):
         img1_path, img2_path, name = self.samples[idx]
-        
-        img1 = np.array(Image.open(img1_path), dtype=np.float32)#[200:1000,0:1000]
-        img2 = np.array(Image.open(img2_path), dtype=np.float32)#[200:1000,0:1000]
+        offset = 15
+        img1 = np.array(Image.open(img1_path), dtype=np.float32)#[384:1000,0:1000]#[35:500,50-offset:450-offset]#
+        img2 = np.array(Image.open(img2_path), dtype=np.float32)#[384:1000,0:1000]#[35:500,50:450]#
         
         # Keep original size - adaptive resizing handled in inference function
         imgs = np.stack([img1,img2], axis=0)
