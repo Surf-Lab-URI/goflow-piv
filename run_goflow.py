@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 from piv_dataset import PIVInference
+from scipy.io import loadmat
 
 
 # Local imports
@@ -83,6 +84,8 @@ def parse_args():
     parser.add_argument("--ext", type=str, default="tif", help="Image extension")
     parser.add_argument("--crop_size", type=int, nargs=2, default=[256, 256])
     parser.add_argument("--rand_trans", nargs='+', type=int, default=0)
+    parser.add_argument('--mat_val', action='store_true',
+                        help='compare inferred field to manually selected particle loctions in .mat file')
 
     
     return parser.parse_args()
@@ -133,19 +136,51 @@ def main():
         u = o[0,:,:]
         v = o[1,:,:]
 
-        plt.figure()
-        im = plt.imshow(u)
+        umax = np.max(u)
+        vmax = np.max(v)
+        umin = np.min(u)
+        vmin = np.min(v)
+
+        plt.figure(1)
+        im = plt.imshow(u, vmin = umin, vmax = umax)
         cbar = plt.colorbar(im)
         cbar.set_label('u', rotation=270, labelpad=15)
-        plt.savefig(os.path.join(dir / f"{n}_u.png"))
-        plt.close()
 
-        plt.figure()
-        im = plt.imshow(v)
+        plt.figure(2)
+        im = plt.imshow(v, vmin = vmin, vmax = vmax)
         cbar = plt.colorbar(im)
         cbar.set_label('v', rotation=270, labelpad=15)
+
+
+        if args.mat_val:
+            mat = loadmat(os.path.join(dir / f"{n}.mat"))
+            p = np.array(mat['p'])
+            uv = p[:,1,:]-p[:,0,:]
+            NP = mat['np']
+
+            for i in range(0, NP[0,0]-1):
+                ui = uv[i,0]
+                vi = uv[i,1]
+                # print(f"u error {u[p[i,0,1],p[i,0,0]]-uv[i,0,0]}")
+                plt.figure(1)
+                plt.scatter(p[i,0,0]-50,p[i,0,1]-35,c=ui-10, s=10, vmin = umin, vmax = umax)
+
+                plt.figure(2)
+                plt.scatter(p[i,0,0]-53,p[i,0,1]-35,c=vi, s=10, vmin = vmin, vmax = vmax)
+
+
+
+                
+        
+        plt.figure(1)
+        plt.savefig(os.path.join(dir / f"{n}_u.png"))
+        plt.close()
+        
+        plt.figure(2)
         plt.savefig(os.path.join(dir / f"{n}_v.png"))
         plt.close()
+                
+
 
 
 
