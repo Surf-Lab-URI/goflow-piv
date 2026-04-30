@@ -51,7 +51,7 @@ def parse_args():
     # Device and model selection
     parser.add_argument('--cuda', type=int, default=0, help='CUDA device index')
     parser.add_argument('--model', type=str, default='unet',
-                        choices=['unet', 'samudra0', 'samudraR', '2layer'],
+                        choices=['unet', 'uvt2t_cnet', 'uvt2t_fullattn', 'samudra0', 'samudraR', '2layer'],
                         help='Model architecture')
     parser.add_argument('--nbase', type=int, default=16, help='Base channels for UNet')
     parser.add_argument('--kernel_size', type=int, default=5, help='Kernel size for 2layer CNN')

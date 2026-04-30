@@ -23,6 +23,8 @@ import gc
 
 # Model imports - adjust paths as needed
 from unet_vel_bn import UNet
+from uvt2t_cnet import UVT2T_CNet
+from uvt2t_variants import UVT2T_FullAttn
 from samudraUnet import SamudraUNet
 from simpleCNN import TwoLayerCNN
 
@@ -409,6 +411,10 @@ def initialize_model(
 
     if model_name == 'unet':
         model = UNet(n_input, n_output, bilinear=True, Nbase=nbase, inpNorm=inp_norm)
+    elif model_name == 'uvt2t_cnet':
+        model = UVT2T_CNet(n_input, n_output, bilinear=True, Nbase=nbase, inpNorm=inp_norm)
+    elif model_name == 'uvt2t_fullattn':
+        model = UVT2T_FullAttn(n_input, n_output, bilinear=True, Nbase=nbase, inpNorm=inp_norm)
     elif model_name == 'samudra0':
         model = SamudraUNet(n_channels=3, no=2, Nbase=2, padding_mode='zeros', inpNorm=inp_norm)
     elif model_name == 'samudraR':
