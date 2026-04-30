@@ -25,7 +25,7 @@ Author: Kaushik Srinivasan (UCLA Atmospheric and Oceanic Sciences)
 
 import torch
 import torch.nn as nn
-from models.unet_parts_t import Down, DoubleConv, Up
+from unet_parts_t import Down, DoubleConv, Up
 
 
 class ChannelAttention(nn.Module):

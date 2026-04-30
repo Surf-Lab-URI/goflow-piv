@@ -9,8 +9,8 @@ decoder use PRE-attention features to preserve fine detail.
 """
 import torch
 import torch.nn as nn
-from models.unet_parts_t import DoubleConv, Down, Up
-from models.uvt2t_cnet import CBAM
+from unet_parts_t import DoubleConv, Down, Up
+from uvt2t_cnet import CBAM
 
 
 class UVT2T_Multi(nn.Module):
